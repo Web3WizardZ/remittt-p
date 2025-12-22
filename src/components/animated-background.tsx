@@ -23,12 +23,16 @@ function generateParticles(count: number): Particle[] {
 }
 
 export default function AnimatedBackground() {
+  const [mounted, setMounted] = useState(false);
   const [particles, setParticles] = useState<Particle[]>([]);
 
-  // IMPORTANT: run only on client after hydration
   useEffect(() => {
+    setMounted(true);
     setParticles(generateParticles(26));
   }, []);
+
+  // Prevent SSR/client mismatches
+  if (!mounted) return null;
 
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
@@ -62,7 +66,7 @@ export default function AnimatedBackground() {
         }}
       />
 
-      {/* Particles (client-only) */}
+      {/* Particles */}
       {particles.map((p, i) => (
         <span
           key={i}
@@ -78,6 +82,21 @@ export default function AnimatedBackground() {
           }}
         />
       ))}
+
+      <style jsx global>{`
+        @keyframes particle {
+          from { transform: translateY(0); }
+          to { transform: translateY(-120vh); }
+        }
+        @keyframes orb {
+          0%, 100% { transform: translate(0,0) scale(1); }
+          50% { transform: translate(-18px, 14px) scale(1.06); }
+        }
+        @keyframes shape {
+          0%, 100% { transform: translate(0,0) rotate(0deg); }
+          50% { transform: translate(10px,-10px) rotate(12deg); }
+        }
+      `}</style>
     </div>
   );
 }

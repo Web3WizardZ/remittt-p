@@ -3,11 +3,17 @@
 import React, { createContext, useEffect, useMemo, useState } from "react";
 import { env } from "@/lib/env";
 
-type PannaState = { ready: boolean; error?: string };
+type PannaState = {
+  ready: boolean;
+  error?: string;
+  LoginButton?: React.ComponentType<any>;
+};
+
 export const PannaCtx = createContext<PannaState>({ ready: false });
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  const [ProviderComp, setProviderComp] = useState<any>(null);
+  const [ready, setReady] = useState(false);
+  const [LoginButton, setLoginButton] = useState<React.ComponentType<any> | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -16,20 +22,20 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const mod: any = await import("panna-sdk");
-        const PannaProvider =
-          mod?.PannaProvider ??
-          mod?.default?.PannaProvider ??
-          mod?.default ??
-          null;
+
+        // Prefer LoginButton; fallback to ConnectButton
+        const Btn = mod?.LoginButton ?? mod?.ConnectButton ?? null;
 
         if (!mounted) return;
 
-        if (!PannaProvider) {
-          setError("PannaProvider not found in panna-sdk exports.");
+        if (!Btn) {
+          setError("panna-sdk loaded, but no LoginButton/ConnectButton export was found.");
+          setReady(false);
           return;
         }
 
-        setProviderComp(() => PannaProvider);
+        setLoginButton(() => Btn);
+        setReady(true);
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message ?? "Failed to load panna-sdk");
@@ -41,33 +47,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const ctxValue = useMemo<PannaState>(() => ({ ready: !!ProviderComp, error }), [ProviderComp, error]);
+  const ctxValue = useMemo(() => ({ ready, error, LoginButton }), [ready, error, LoginButton]);
 
-  // If provider failed to load, still render app shell (so you can see UI)
-  if (!ProviderComp) {
-    return <PannaCtx.Provider value={ctxValue}>{children}</PannaCtx.Provider>;
-  }
-
-  // Best-effort config (extra props will typically be ignored if unsupported)
-  return (
-    <PannaCtx.Provider value={ctxValue}>
-      <div className="panna-surface">
-        <ProviderComp
-          partnerId={env.NEXT_PUBLIC_PARTNER_ID}
-          clientId={env.NEXT_PUBLIC_CLIENT_ID}
-          chainId={env.NEXT_PUBLIC_CHAIN_ID}
-          appName={env.NEXT_PUBLIC_APP_NAME}
-          appDescription={env.NEXT_PUBLIC_APP_DESCRIPTION}
-          theme={{
-            mode: "light",
-            accentColor: "#7C3AED",
-            overlay: "rgba(15, 23, 42, 0.55)",
-            borderRadius: 18,
-          }}
-        >
-          {children}
-        </ProviderComp>
-      </div>
-    </PannaCtx.Provider>
-  );
+  return <PannaCtx.Provider value={ctxValue}>{children}</PannaCtx.Provider>;
 }

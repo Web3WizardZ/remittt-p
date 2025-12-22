@@ -10,50 +10,51 @@ export default function Splash() {
     <main className="relative min-h-screen">
       <AnimatedBackground />
 
-      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-between px-5 py-8">
-        <div />
-
+      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55 }}
-          className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(17,24,39,0.15)] backdrop-blur"
+          className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-7 shadow-[0_20px_70px_rgba(0,0,0,0.35)]"
         >
           <div className="flex items-center gap-3">
-            {/* Put your logo in /public/logo.png */}
-            <div className="h-11 w-11 overflow-hidden rounded-2xl bg-white/70 ring-1 ring-black/5">
-              <Image src="/logo.png" alt="RemittEase" width={44} height={44} className="h-full w-full object-contain p-2" />
+            <div className="h-12 w-12 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
+              <Image
+                src="/logo.png"
+                alt="RemittEase"
+                width={48}
+                height={48}
+                className="h-full w-full object-contain p-2"
+                priority
+              />
             </div>
             <div>
-              <div className="text-lg font-semibold">RemittEase</div>
-              <div className="text-sm text-[var(--re-muted)]">Cross-border payments, done right.</div>
+              <div className="text-xl font-semibold">RemittEase</div>
+              <div className="text-sm text-[var(--re-muted)]">Cross-border payments, done properly.</div>
             </div>
           </div>
 
-          <div className="mt-5 space-y-2">
-            <h1 className="text-2xl font-bold leading-tight">
-              Send, receive, and manage money across countries — fast.
+          <div className="mt-6 space-y-3">
+            <h1 className="text-2xl font-semibold leading-tight">
+              Send and receive money across countries — without the friction.
             </h1>
             <p className="text-sm leading-relaxed text-[var(--re-muted)]">
-              Get started!
+              Built for people and businesses that move value globally. Fast, transparent, and simple from the first tap.
             </p>
           </div>
 
-          <div className="mt-6">
+          <div className="mt-7">
             <Link
               href="/auth"
-              className="block w-full rounded-full bg-gradient-to-r from-violet-600 to-pink-500 px-4 py-3 text-center text-sm font-semibold text-white shadow-[0_10px_30px_rgba(124,58,237,0.25)] active:scale-[0.99]"
+              className="block w-full rounded-full bg-white px-5 py-3 text-center text-sm font-semibold text-black hover:bg-white/90"
             >
               Get started
             </Link>
             <p className="mt-3 text-center text-xs text-[var(--re-muted)]">
-              By continuing, you agree to our Terms & Privacy Policy.
+              You’re in control from start to finish.
             </p>
           </div>
         </motion.div>
-
-        <div className="pb-2 text-center text-xs text-black/40">© RemittEase</div>
-
       </div>
     </main>
   );

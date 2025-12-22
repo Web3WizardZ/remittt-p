@@ -1,11 +1,12 @@
-import dynamicImport from "next/dynamic";
+import { Suspense } from "react";
+import DepositStatusClient from "./DepositStatusClient";
 
 export const dynamic = "force-dynamic";
 
-const DepositStatusClient = dynamicImport(() => import("./DepositStatusClient"), {
-  ssr: false,
-});
-
 export default function Page() {
-  return <DepositStatusClient />;
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <DepositStatusClient />
+    </Suspense>
+  );
 }

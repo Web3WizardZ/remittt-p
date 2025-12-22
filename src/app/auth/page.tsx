@@ -3,9 +3,9 @@
 import AnimatedBackground from "@/components/animated-background";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import { ConnectButton, useActiveAccount } from "panna-sdk/react";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ConnectButton, useActiveAccount } from "panna-sdk/react";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -28,28 +28,23 @@ export default function AuthPage() {
         >
           <div className="flex flex-col items-center text-center">
             <div className="h-14 w-14 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
-              <Image
-                src="/logo.png"
-                alt="RemittEase"
-                width={56}
-                height={56}
-                className="h-full w-full object-contain p-2"
-                priority
-              />
+              <Image src="/logo.png" alt="RemittEase" width={56} height={56} className="h-full w-full object-contain p-2" priority />
             </div>
 
             <div className="mt-4 text-xl font-semibold">Welcome to RemittEase</div>
-            <div className="mt-1 text-sm text-[var(--re-muted)]">Sign in to continue.</div>
+            <div className="mt-1 text-sm text-[var(--re-muted)]">Cross-border payments, done properly.</div>
           </div>
 
-          <div className="mt-7 space-y-3">
-            <div className="panna-surface">
-              <ConnectButton />
-            </div>
-
-            <p className="text-center text-xs text-[var(--re-muted)]">
-              If nothing opens, allow popups for this site.
-            </p>
+          <div className="mt-7 panna-surface">
+            <ConnectButton
+              connectButton={{ title: "Continue" }}
+              connectDialog={{
+                title: "Sign in",
+                description: "Secure access in a few seconds.",
+                otpTitle: "Enter code",
+                otpDescription: "Use the code we sent you.",
+              }}
+            />
           </div>
         </motion.div>
       </div>

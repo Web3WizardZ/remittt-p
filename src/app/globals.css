@@ -1,5 +1,7 @@
 @import "tailwindcss";
+@import "panna-sdk/styles.css";
 
+/* RemittEase Design Tokens */
 :root {
   --re-primary: #7c3aed;
   --re-primary-light: #a78bfa;
@@ -14,6 +16,12 @@
   --re-border: rgba(15, 23, 42, 0.08);
 }
 
+/* Base */
+html,
+body {
+  height: 100%;
+}
+
 body {
   color: var(--re-text);
   background: linear-gradient(135deg, var(--re-bg-a), var(--re-bg-b));
@@ -24,12 +32,31 @@ body {
 
 /* nicer mobile viewport handling */
 @supports (height: 100dvh) {
-  body { min-height: 100dvh; }
+  body {
+    min-height: 100dvh;
+  }
 }
 
-/* RemittEase feel for Panna/embedded auth inside container */
-.panna-surface button,
-.panna-surface [role="button"] {
+/* -------- Panna Dialog Theming (RemittEase) -------- */
+.panna-surface [data-slot="dialog-overlay"] {
+  background: rgba(2, 6, 23, 0.55) !important;
+  backdrop-filter: blur(8px);
+}
+
+.panna-surface [data-slot="dialog-content"] {
+  border-radius: 24px !important;
+  border: 1px solid var(--re-border) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  box-shadow: 0 30px 80px rgba(2, 6, 23, 0.25) !important;
+}
+
+/* Keep footer hidden if present */
+.panna-surface [data-slot="dialog-footer"] {
+  display: none !important;
+}
+
+/* -------- Panna Button Styling -------- */
+.panna-surface :where(button, [role="button"]) {
   border-radius: 9999px !important;
   font-weight: 600 !important;
 }
@@ -41,22 +68,59 @@ body {
   border: 0 !important;
   width: 100% !important;
 }
+
+/* Optional: hover/active feel */
+.panna-surface button:hover {
+  filter: brightness(0.98);
+}
+
+.panna-surface button:active {
+  transform: translateY(1px);
+}
+
+/* -------- Background Animations (AnimatedBackground) -------- */
 @keyframes particle {
-  0%   { transform: translate(0, 110vh) rotate(0deg); opacity: 0; }
-  10%  { opacity: 0.9; }
-  90%  { opacity: 0.9; }
-  100% { transform: translate(40vw, -120vh) rotate(360deg); opacity: 0; }
+  0% {
+    transform: translate(0, 110vh) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.9;
+  }
+  90% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(40vw, -120vh) rotate(360deg);
+    opacity: 0;
+  }
 }
 
 @keyframes orb {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(100px, -90px) scale(1.10); }
-  66% { transform: translate(-90px, 110px) scale(0.90); }
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(100px, -90px) scale(1.10);
+  }
+  66% {
+    transform: translate(-90px, 110px) scale(0.90);
+  }
 }
 
 @keyframes shape {
-  0%, 100% { transform: translate(0,0) rotate(0deg); }
-  25% { transform: translate(45px,-25px) rotate(90deg); }
-  50% { transform: translate(-25px,45px) rotate(180deg); }
-  75% { transform: translate(25px,-45px) rotate(270deg); }
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(45px, -25px) rotate(90deg);
+  }
+  50% {
+    transform: translate(-25px, 45px) rotate(180deg);
+  }
+  75% {
+    transform: translate(25px, -45px) rotate(270deg);
+  }
 }

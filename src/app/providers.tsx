@@ -1,42 +1,71 @@
 "use client";
 
-import React, { createContext, useMemo } from "react";
+import React, { createContext, useEffect, useMemo, useState } from "react";
 import { env } from "@/lib/env";
-
-// ✅ Use the React entry
-import { PannaProvider } from "panna-sdk/react";
 
 type PannaState = { ready: boolean; error?: string };
 export const PannaCtx = createContext<PannaState>({ ready: false });
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  const missing: string[] = [];
-  if (!env.NEXT_PUBLIC_PARTNER_ID) missing.push("NEXT_PUBLIC_PARTNER_ID");
-  if (!env.NEXT_PUBLIC_CLIENT_ID) missing.push("NEXT_PUBLIC_CLIENT_ID");
-  if (!env.NEXT_PUBLIC_CHAIN_ID) missing.push("NEXT_PUBLIC_CHAIN_ID");
-  if (!env.NEXT_PUBLIC_APP_NAME) missing.push("NEXT_PUBLIC_APP_NAME");
-  if (!env.NEXT_PUBLIC_APP_DESCRIPTION) missing.push("NEXT_PUBLIC_APP_DESCRIPTION");
+  const [ProviderComp, setProviderComp] = useState<any>(null);
+  const [error, setError] = useState<string | undefined>(undefined);
 
-  const error = missing.length ? `Missing env: ${missing.join(", ")}` : undefined;
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        // Prefer the react entry (common for SDK UI/providers)
+        let mod: any;
+        try {
+          mod = await import("panna-sdk/react");
+        } catch {
+          mod = await import("panna-sdk");
+        }
+
+        const PannaProvider =
+          mod?.PannaProvider ?? mod?.default?.PannaProvider ?? mod?.default ?? null;
+
+        if (!mounted) return;
+
+        if (!PannaProvider) {
+          setError("PannaProvider not found in panna-sdk exports.");
+          return;
+        }
+
+        setProviderComp(() => PannaProvider);
+      } catch (e: any) {
+        if (!mounted) return;
+        setError(e?.message ?? "Failed to load panna-sdk");
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const ctxValue = useMemo<PannaState>(
-    () => ({ ready: !error, error }),
-    [error]
+    () => ({ ready: !!ProviderComp, error }),
+    [ProviderComp, error]
   );
 
-  // If env is missing, still render UI shell
-  if (error) {
+  // Render shell even if provider fails (so you can still see UI)
+  if (!ProviderComp) {
     return <PannaCtx.Provider value={ctxValue}>{children}</PannaCtx.Provider>;
   }
 
   return (
     <PannaCtx.Provider value={ctxValue}>
-      <PannaProvider
-  partnerId={env.NEXT_PUBLIC_PARTNER_ID}
-  clientId={env.NEXT_PUBLIC_CLIENT_ID}
-  chainId={String(env.NEXT_PUBLIC_CHAIN_ID)}
->
-  {children}
-</PannaProvider>
+      <div className="panna-surface">
+        <ProviderComp
+          partnerId={env.NEXT_PUBLIC_PARTNER_ID}
+          clientId={env.NEXT_PUBLIC_CLIENT_ID}
+          chainId={String(env.NEXT_PUBLIC_CHAIN_ID)} // MUST be string in 0.3.0-beta.1
+        >
+          {children}
+        </ProviderComp>
+      </div>
     </PannaCtx.Provider>
   );
 }

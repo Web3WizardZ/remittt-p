@@ -14,13 +14,17 @@
   --re-border: rgba(15, 23, 42, 0.08);
 }
 
-html, body {
-  height: 100%;
-}
-
 body {
   color: var(--re-text);
   background: linear-gradient(135deg, var(--re-bg-a), var(--re-bg-b));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+/* nicer mobile viewport handling */
+@supports (height: 100dvh) {
+  body { min-height: 100dvh; }
 }
 
 /* RemittEase feel for Panna/embedded auth inside container */

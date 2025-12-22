@@ -1,53 +1,42 @@
 "use client";
 
-import React, { createContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useMemo } from "react";
 import { env } from "@/lib/env";
 
-type PannaState = {
-  ready: boolean;
-  error?: string;
-  LoginButton?: React.ComponentType<any>;
-};
+// ✅ Use the React entry
+import { PannaProvider } from "panna-sdk/react";
 
+type PannaState = { ready: boolean; error?: string };
 export const PannaCtx = createContext<PannaState>({ ready: false });
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  const [ready, setReady] = useState(false);
-  const [LoginButton, setLoginButton] = useState<React.ComponentType<any> | undefined>(undefined);
-  const [error, setError] = useState<string | undefined>(undefined);
+  const missing: string[] = [];
+  if (!env.NEXT_PUBLIC_PARTNER_ID) missing.push("NEXT_PUBLIC_PARTNER_ID");
+  if (!env.NEXT_PUBLIC_CLIENT_ID) missing.push("NEXT_PUBLIC_CLIENT_ID");
+  if (!env.NEXT_PUBLIC_CHAIN_ID) missing.push("NEXT_PUBLIC_CHAIN_ID");
+  if (!env.NEXT_PUBLIC_APP_NAME) missing.push("NEXT_PUBLIC_APP_NAME");
+  if (!env.NEXT_PUBLIC_APP_DESCRIPTION) missing.push("NEXT_PUBLIC_APP_DESCRIPTION");
 
-  useEffect(() => {
-    let mounted = true;
+  const error = missing.length ? `Missing env: ${missing.join(", ")}` : undefined;
+  const ctxValue = useMemo<PannaState>(
+    () => ({ ready: !error, error }),
+    [error]
+  );
 
-    (async () => {
-      try {
-        const mod: any = await import("panna-sdk");
+  // If env is missing, still render UI shell
+  if (error) {
+    return <PannaCtx.Provider value={ctxValue}>{children}</PannaCtx.Provider>;
+  }
 
-        // Prefer LoginButton; fallback to ConnectButton
-        const Btn = mod?.LoginButton ?? mod?.ConnectButton ?? null;
-
-        if (!mounted) return;
-
-        if (!Btn) {
-          setError("panna-sdk loaded, but no LoginButton/ConnectButton export was found.");
-          setReady(false);
-          return;
-        }
-
-        setLoginButton(() => Btn);
-        setReady(true);
-      } catch (e: any) {
-        if (!mounted) return;
-        setError(e?.message ?? "Failed to load panna-sdk");
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const ctxValue = useMemo(() => ({ ready, error, LoginButton }), [ready, error, LoginButton]);
-
-  return <PannaCtx.Provider value={ctxValue}>{children}</PannaCtx.Provider>;
+  return (
+    <PannaCtx.Provider value={ctxValue}>
+      <PannaProvider
+  partnerId={env.NEXT_PUBLIC_PARTNER_ID}
+  clientId={env.NEXT_PUBLIC_CLIENT_ID}
+  chainId={String(env.NEXT_PUBLIC_CHAIN_ID)}
+>
+  {children}
+</PannaProvider>
+    </PannaCtx.Provider>
+  );
 }

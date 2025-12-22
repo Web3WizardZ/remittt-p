@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @import "panna-sdk/styles.css";
 
-/* RemittEase Design Tokens */
 :root {
   --re-primary: #7c3aed;
   --re-primary-light: #a78bfa;
@@ -12,11 +11,12 @@
 
   --re-text: #121426;
   --re-muted: #64748b;
-  --re-card: rgba(255, 255, 255, 0.85);
-  --re-border: rgba(15, 23, 42, 0.08);
+
+  --re-card: rgba(255, 255, 255, 0.88);
+  --re-border: rgba(15, 23, 42, 0.10);
+  --re-shadow: 0 22px 70px rgba(2, 6, 23, 0.12);
 }
 
-/* Base */
 html,
 body {
   height: 100%;
@@ -37,6 +37,36 @@ body {
   }
 }
 
+/* --------- Reusable surfaces --------- */
+.re-card {
+  background: var(--re-card);
+  border: 1px solid var(--re-border);
+  box-shadow: var(--re-shadow);
+  backdrop-filter: blur(10px);
+}
+
+/* Primary gradient button (used by your app + Panna buttons) */
+.re-btn {
+  border-radius: 9999px;
+  font-weight: 700;
+  padding: 12px 16px;
+  width: 100%;
+  color: white;
+  background: linear-gradient(90deg, var(--re-primary), var(--re-accent));
+  border: 0;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+.re-btn:hover {
+  filter: brightness(0.98);
+}
+.re-btn:active {
+  transform: translateY(1px);
+}
+
+.re-subtle {
+  color: var(--re-muted);
+}
+
 /* -------- Panna Dialog Theming (RemittEase) -------- */
 .panna-surface [data-slot="dialog-overlay"] {
   background: rgba(2, 6, 23, 0.55) !important;
@@ -47,18 +77,17 @@ body {
   border-radius: 24px !important;
   border: 1px solid var(--re-border) !important;
   background: rgba(255, 255, 255, 0.92) !important;
-  box-shadow: 0 30px 80px rgba(2, 6, 23, 0.25) !important;
+  box-shadow: 0 30px 90px rgba(2, 6, 23, 0.20) !important;
 }
 
-/* Keep footer hidden if present */
 .panna-surface [data-slot="dialog-footer"] {
   display: none !important;
 }
 
-/* -------- Panna Button Styling -------- */
+/* Make Panna buttons match RemittEase */
 .panna-surface :where(button, [role="button"]) {
   border-radius: 9999px !important;
-  font-weight: 600 !important;
+  font-weight: 700 !important;
 }
 
 .panna-surface button {
@@ -67,60 +96,33 @@ body {
   padding: 12px 16px !important;
   border: 0 !important;
   width: 100% !important;
+  transition: transform 120ms ease, filter 120ms ease;
 }
 
-/* Optional: hover/active feel */
 .panna-surface button:hover {
   filter: brightness(0.98);
 }
-
 .panna-surface button:active {
   transform: translateY(1px);
 }
 
 /* -------- Background Animations (AnimatedBackground) -------- */
 @keyframes particle {
-  0% {
-    transform: translate(0, 110vh) rotate(0deg);
-    opacity: 0;
-  }
-  10% {
-    opacity: 0.9;
-  }
-  90% {
-    opacity: 0.9;
-  }
-  100% {
-    transform: translate(40vw, -120vh) rotate(360deg);
-    opacity: 0;
-  }
+  0% { transform: translate(0, 110vh) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.9; }
+  90% { opacity: 0.9; }
+  100% { transform: translate(40vw, -120vh) rotate(360deg); opacity: 0; }
 }
 
 @keyframes orb {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  33% {
-    transform: translate(100px, -90px) scale(1.10);
-  }
-  66% {
-    transform: translate(-90px, 110px) scale(0.90);
-  }
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(100px, -90px) scale(1.10); }
+  66% { transform: translate(-90px, 110px) scale(0.90); }
 }
 
 @keyframes shape {
-  0%,
-  100% {
-    transform: translate(0, 0) rotate(0deg);
-  }
-  25% {
-    transform: translate(45px, -25px) rotate(90deg);
-  }
-  50% {
-    transform: translate(-25px, 45px) rotate(180deg);
-  }
-  75% {
-    transform: translate(25px, -45px) rotate(270deg);
-  }
+  0%, 100% { transform: translate(0,0) rotate(0deg); }
+  25% { transform: translate(45px,-25px) rotate(90deg); }
+  50% { transform: translate(-25px,45px) rotate(180deg); }
+  75% { transform: translate(25px,-45px) rotate(270deg); }
 }

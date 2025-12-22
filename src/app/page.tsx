@@ -15,7 +15,7 @@ export default function Splash() {
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55 }}
-          className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-7 shadow-[0_20px_70px_rgba(0,0,0,0.35)]"
+          className="re-card rounded-3xl p-7"
         >
           <div className="flex flex-col items-center text-center">
             <div className="h-16 w-16 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
@@ -30,25 +30,33 @@ export default function Splash() {
             </div>
 
             <div className="mt-4 text-2xl font-semibold">RemittEase</div>
-            <div className="mt-1 text-sm text-[var(--re-muted)]">
-              Cross-border payments, done properly.
-            </div>
+            <div className="mt-1 text-sm re-subtle">Cross-border payments, done properly.</div>
           </div>
 
           <div className="mt-7 text-center">
             <h1 className="text-2xl font-semibold leading-tight">
-              Send and receive across borders.
+              Send and receive across countries — fast.
             </h1>
-            <p className="mt-2 text-sm text-[var(--re-muted)]">Fast. Transparent. Simple.</p>
+            <p className="mt-2 text-sm re-subtle">
+              Simple from the first tap.
+            </p>
           </div>
 
-          <div className="mt-8">
-            <Link
-              href="/auth"
-              className="block w-full rounded-full bg-white px-5 py-3 text-center text-sm font-semibold text-black hover:bg-white/90"
-            >
+          <div className="mt-8 space-y-3">
+            <Link href="/auth" className="re-btn block text-center">
               Get started
             </Link>
+
+            <Link
+              href="/auth"
+              className="block text-center text-sm font-semibold text-[var(--re-primary)]"
+            >
+              I already have an account
+            </Link>
+
+            <p className="text-center text-xs re-subtle">
+              Secure sign-in • No long forms
+            </p>
           </div>
         </motion.div>
       </div>

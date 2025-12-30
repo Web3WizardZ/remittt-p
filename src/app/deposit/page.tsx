@@ -64,13 +64,14 @@ function buildSiweMessage(payload: {
 /**
  * Custom hook that handles SIWE authentication with retry logic.
  * 
- * The issue: Thirdweb embedded wallets need time to complete their internal 
- * authentication with thirdweb's enclave service before they can sign messages.
- * The AccountEventProvider attempts SIWE immediately on connect, which often
- * fails with a 401 error because the wallet isn't ready yet.
+ * The issue: Thirdweb embedded/enclave wallets need significant time to complete 
+ * their internal authentication with thirdweb's backend before they can sign messages.
+ * The 401 errors from `sign-typed-data` indicate the enclave session isn't ready.
  * 
- * This hook polls for an existing token AND retries SIWE authentication
- * if no token is found.
+ * This hook:
+ * 1. Waits an initial delay for the enclave to initialize
+ * 2. Polls for an existing token (in case SDK's AccountEventProvider succeeded)
+ * 3. Retries SIWE authentication with longer intervals
  */
 function useSiweAuth() {
   const { siweAuth } = usePanna();
@@ -80,11 +81,14 @@ function useSiweAuth() {
   const [isReady, setIsReady] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const attemptCountRef = useRef(0);
+  const [attemptCount, setAttemptCount] = useState(0);
   const isMountedRef = useRef(true);
+  const authInProgressRef = useRef(false);
   
-  const maxAttempts = 12; // ~10 seconds total with 800ms delay
-  const retryDelayMs = 800;
+  // Configuration - give thirdweb enclave plenty of time to initialize
+  const initialDelayMs = 3000;  // Wait 3 seconds before first attempt
+  const retryDelayMs = 1500;    // 1.5 seconds between retries
+  const maxAttempts = 15;       // Up to ~25 seconds total
 
   /**
    * Attempts SIWE authentication by generating a payload, signing it,
@@ -96,12 +100,17 @@ function useSiweAuth() {
   ): Promise<boolean> => {
     try {
       const currentAccount = currentWallet.getAccount();
-      if (!currentAccount) return false;
+      if (!currentAccount) {
+        console.debug("SIWE: No account available yet");
+        return false;
+      }
 
       // Check if this is a smart account (ecosystem wallet with account abstraction)
       const config = currentWallet.getConfig() as { smartAccount?: unknown };
       const isSmartAccount = !!config?.smartAccount;
 
+      console.debug("SIWE: Generating payload...");
+      
       // Generate SIWE payload from the API
       const payload = await siweAuth.generatePayload({
         address: currentAccount.address,
@@ -110,9 +119,13 @@ function useSiweAuth() {
       // Build EIP-4361 message
       const message = buildSiweMessage(payload);
 
-      // Sign the message
+      console.debug("SIWE: Signing message...");
+      
+      // Sign the message - this is where 401 errors occur if enclave isn't ready
       const signature = await currentAccount.signMessage({ message });
 
+      console.debug("SIWE: Verifying with API...");
+      
       // Verify with the API
       const success = await siweAuth.login({
         payload,
@@ -121,21 +134,25 @@ function useSiweAuth() {
         isSafeWallet: isSmartAccount,
       });
 
+      if (success) {
+        console.debug("SIWE: Authentication successful!");
+      }
+      
       return success;
     } catch (err) {
-      // 401 errors are expected when wallet isn't ready yet
+      // 401 errors are expected when thirdweb enclave isn't ready yet
       if (err instanceof Error && err.message.includes("401")) {
-        console.debug("SIWE: Wallet not ready yet (401), will retry...");
+        console.debug("SIWE: Enclave not ready yet (401), will retry...");
         return false;
       }
-      console.error("SIWE auth error:", err);
+      // Log other errors but don't treat as fatal - might recover on retry
+      console.warn("SIWE auth attempt failed:", err);
       return false;
     }
   }, [siweAuth]);
 
   useEffect(() => {
     isMountedRef.current = true;
-    
     return () => {
       isMountedRef.current = false;
     };
@@ -147,13 +164,15 @@ function useSiweAuth() {
       setIsReady(false);
       setIsAuthenticating(false);
       setError(null);
-      attemptCountRef.current = 0;
+      setAttemptCount(0);
+      authInProgressRef.current = false;
       return;
     }
 
     // Check if we already have a valid token
     const existingToken = siweAuth.getValidAuthToken();
     if (existingToken) {
+      console.debug("SIWE: Valid token already exists");
       setIsReady(true);
       setIsAuthenticating(false);
       return;
@@ -164,22 +183,52 @@ function useSiweAuth() {
       return;
     }
 
+    // Prevent concurrent auth attempts
+    if (authInProgressRef.current) {
+      return;
+    }
+    authInProgressRef.current = true;
+
     // Start authentication process
     setIsAuthenticating(true);
     setError(null);
-    attemptCountRef.current = 0;
+    setAttemptCount(0);
 
     const authenticate = async () => {
-      while (attemptCountRef.current < maxAttempts && isMountedRef.current) {
-        attemptCountRef.current++;
+      console.debug(`SIWE: Starting authentication, waiting ${initialDelayMs}ms for enclave...`);
+      
+      // Initial delay - give thirdweb enclave time to fully initialize
+      await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
+      
+      if (!isMountedRef.current) return;
+
+      // Check if token became available during initial wait
+      const tokenAfterWait = siweAuth.getValidAuthToken();
+      if (tokenAfterWait) {
+        console.debug("SIWE: Token became available during initial wait");
+        setIsReady(true);
+        setIsAuthenticating(false);
+        authInProgressRef.current = false;
+        return;
+      }
+
+      let attempts = 0;
+      
+      while (attempts < maxAttempts && isMountedRef.current) {
+        attempts++;
+        setAttemptCount(attempts);
         
-        // First, check if token became available (e.g., from AccountEventProvider)
+        console.debug(`SIWE: Attempt ${attempts}/${maxAttempts}`);
+        
+        // Check if token became available (e.g., from SDK's AccountEventProvider)
         const token = siweAuth.getValidAuthToken();
         if (token) {
+          console.debug("SIWE: Token found from another source");
           if (isMountedRef.current) {
             setIsReady(true);
             setIsAuthenticating(false);
           }
+          authInProgressRef.current = false;
           return;
         }
 
@@ -190,30 +239,35 @@ function useSiweAuth() {
             setIsReady(true);
             setIsAuthenticating(false);
           }
+          authInProgressRef.current = false;
           return;
         }
 
         // Wait before retrying
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        if (attempts < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        }
       }
 
       // All attempts exhausted
+      console.error("SIWE: All authentication attempts failed");
       if (isMountedRef.current) {
         setIsAuthenticating(false);
-        setError("Failed to establish secure session. Please reconnect your wallet.");
+        setError("Unable to establish secure session. Please disconnect and try again.");
       }
+      authInProgressRef.current = false;
     };
 
     authenticate();
   }, [account, wallet, siweAuth, attemptSiweAuth]);
 
-  return { isReady, isAuthenticating, error };
+  return { isReady, isAuthenticating, error, attemptCount, maxAttempts };
 }
 
 export default function DepositPage() {
   const router = useRouter();
   const account = useActiveAccount();
-  const { isReady, isAuthenticating, error } = useSiweAuth();
+  const { isReady, isAuthenticating, error, attemptCount, maxAttempts } = useSiweAuth();
 
   const connected = useConnectedAccounts();
   const { disconnect } = useLogout();
@@ -250,8 +304,20 @@ export default function DepositPage() {
                         Securing your session…
                       </div>
                     </div>
-                    <div className="mt-1 text-xs text-[var(--re-muted)]">
-                      This usually takes a moment after you sign in.
+                    <div className="mt-2 text-xs text-[var(--re-muted)]">
+                      Setting up your secure wallet connection.
+                      {attemptCount > 0 && (
+                        <span className="ml-1">
+                          (Attempt {attemptCount}/{maxAttempts})
+                        </span>
+                      )}
+                    </div>
+                    {/* Progress bar */}
+                    <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-gray-200">
+                      <div 
+                        className="h-full bg-black transition-all duration-500"
+                        style={{ width: `${(attemptCount / maxAttempts) * 100}%` }}
+                      />
                     </div>
                   </>
                 ) : error ? (
@@ -261,7 +327,7 @@ export default function DepositPage() {
                       onClick={forceReauth}
                       className="w-full rounded-full bg-black px-4 py-3 text-sm font-semibold text-white"
                     >
-                      Reconnect
+                      Disconnect & Try Again
                     </button>
                   </div>
                 ) : null}

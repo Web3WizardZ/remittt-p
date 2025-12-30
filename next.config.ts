@@ -1,14 +1,17 @@
-// next.config.ts
-export default {
-  async headers() {
-    return [
-      {
-        source: "/(.*)",
-        headers: [
-          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
-          // If you had COEP too, consider removing it unless you truly need it
-        ],
-      },
-    ];
+import path from "path";
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  webpack(config) {
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      "@radix-ui/react-dialog": path.resolve(
+        process.cwd(),
+        "node_modules/@radix-ui/react-dialog"
+      ),
+    };
+    return config;
   },
 };
+
+export default nextConfig;

@@ -3,7 +3,7 @@
 import AnimatedBackground from "@/components/animated-background";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   useActiveAccount,
@@ -12,6 +12,7 @@ import {
   usePanna,
   useTotalFiatBalance,
   useUserProfiles,
+  BuyForm,
 } from "panna-sdk/react";
 import { FiatCurrency } from "panna-sdk/core";
 import { ArrowDownLeft, ArrowUpRight, Plus, UserRound } from "lucide-react";
@@ -35,6 +36,55 @@ function profileLabel(email?: string, phone?: string) {
   return "";
 }
 
+function DepositModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const stepperRef = useRef<any>(null);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      <div className="absolute left-1/2 top-1/2 w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2">
+        <div className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.25)]">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-lg font-semibold">Deposit</div>
+              <div className="text-sm text-[var(--re-muted)]">
+                Add funds to your RemittEase balance
+              </div>
+            </div>
+
+            <button
+              onClick={onClose}
+              className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-5 panna-surface">
+            <BuyForm onClose={onClose} stepperRef={stepperRef} />
+          </div>
+
+          <p className="mt-3 text-center text-xs text-[var(--re-muted)]">
+            If the provider popup doesn’t open, disable popup blockers for this site.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AccountClient() {
   const router = useRouter();
 
@@ -43,10 +93,10 @@ export default function AccountClient() {
   const { disconnect } = useLogout();
   const { client } = usePanna();
 
-  // ✅ Default is USD
   const [currency, setCurrency] = useState<FiatCurrency>(FiatCurrency.USD);
 
   const [receiveOpen, setReceiveOpen] = useState(false);
+  const [depositOpen, setDepositOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const address = activeAccount?.address ?? "";
@@ -56,7 +106,6 @@ export default function AccountClient() {
     if (!address) router.replace("/auth");
   }, [address, router]);
 
-  // Profiles
   const { data: userProfiles } = useUserProfiles({ client: client! });
 
   const emailProfile = userProfiles?.find(
@@ -72,7 +121,6 @@ export default function AccountClient() {
   const userEmail = emailProfile?.details?.email;
   const userPhone = phoneProfile?.details?.phone;
 
-  // ✅ Total fiat across supported tokens (ETH/USDC/USDT/LSK etc.)
   const { data: totalFiat = 0, isLoading: isLoadingTotal } = useTotalFiatBalance(
     { address, currency },
     { enabled: isConnected }
@@ -104,7 +152,7 @@ export default function AccountClient() {
       <AnimatedBackground />
 
       <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
-        {/* Header (no “Lisk”) */}
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
@@ -134,7 +182,7 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Balance (fiat only) */}
+        {/* Balance */}
         <div className="mt-6 relative overflow-hidden rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5 shadow-[0_20px_70px_rgba(0,0,0,0.15)]">
           {/* faint logo watermark */}
           <div className="pointer-events-none absolute right-[-22px] top-1/2 -translate-y-1/2 opacity-[0.08]">
@@ -188,8 +236,9 @@ export default function AccountClient() {
             <div className="mt-1 text-xs text-[var(--re-muted)]">Get paid</div>
           </button>
 
+          {/* ✅ Deposit now opens Panna flow modal */}
           <button
-            onClick={() => router.push("/deposit")}
+            onClick={() => setDepositOpen(true)}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90"
           >
             <Plus className="mx-auto h-5 w-5" />
@@ -263,6 +312,9 @@ export default function AccountClient() {
           </div>
         </div>
       ) : null}
+
+      {/* ✅ Deposit modal (Panna BuyForm) */}
+      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} />
     </main>
   );
 }

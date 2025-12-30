@@ -1,25 +1,14 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  reactCompiler: true,
-
-  // Add security headers that allow popup-based authentication flows
-  // This fixes: "Cross-Origin-Opener-Policy policy would block the window.closed call"
+// next.config.ts
+export default {
   async headers() {
     return [
       {
-        source: "/:path*",
+        source: "/(.*)",
         headers: [
-          {
-            // Use 'same-origin-allow-popups' instead of 'same-origin' to allow
-            // communication with popup windows (required for OAuth flows like Google)
-            key: "Cross-Origin-Opener-Policy",
-            value: "same-origin-allow-popups",
-          },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          // If you had COEP too, consider removing it unless you truly need it
         ],
       },
     ];
   },
 };
-
-export default nextConfig;

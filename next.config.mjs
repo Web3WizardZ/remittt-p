@@ -1,17 +1,4 @@
-import path from "path";
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  webpack(config) {
-    config.resolve.alias = {
-      ...(config.resolve.alias || {}),
-      "@radix-ui/react-dialog": path.resolve(
-        process.cwd(),
-        "node_modules/@radix-ui/react-dialog"
-      ),
-    };
-    return config;
-  },
-};
+/** @type {import('next').NextConfig} */
+const nextConfig = {};
 
 export default nextConfig;

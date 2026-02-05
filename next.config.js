@@ -4,6 +4,8 @@ const path = require("path");
 const nextConfig = {
   reactStrictMode: true,
 
+  // DO NOT set: output: "export"
+
   webpack: (config) => {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),

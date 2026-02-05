@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { Magic } from "@magic-sdk/admin";
 
 const magicAdmin = new Magic(process.env.MAGIC_SECRET_KEY!);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const { didToken } = await req.json();

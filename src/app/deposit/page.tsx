@@ -1,12 +1,11 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import AnimatedBackground from "@/components/animated-background";
-import {
-  BuyForm,
-  useActiveAccount,
-  usePanna,
-} from "panna-sdk/react";
-import { useEffect, useRef } from "react";
+import { BuyForm, useActiveAccount, usePanna } from "panna-sdk/react";
+import { useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 export default function DepositPage() {
@@ -15,29 +14,25 @@ export default function DepositPage() {
   const { siweAuth } = usePanna();
   const stepperRef = useRef<any>(null);
 
-  const hasValidToken = siweAuth.getValidAuthToken() !== null;
+  // compute inside render (safe) but memo avoids re-check spam
+  const hasValidToken = useMemo(() => siweAuth.getValidAuthToken() !== null, [siweAuth]);
 
   useEffect(() => {
-    // Not logged in at all - go to auth
     if (!account?.address) {
       router.replace("/auth");
       return;
     }
-
-    // Logged in but no SIWE token - go back to auth to complete it
     if (!hasValidToken) {
-      // Clear any stale state and re-auth
       router.replace("/auth");
     }
   }, [account?.address, hasValidToken, router]);
 
-  // Don't render anything until we confirm we have both account and token
   if (!account?.address || !hasValidToken) {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
         <div className="flex min-h-screen items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-3 border-gray-200 border-t-black" />
+          <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-gray-200 border-t-black" />
         </div>
       </main>
     );
@@ -55,10 +50,7 @@ export default function DepositPage() {
 
           <div className="mt-6">
             <div className="panna-surface">
-              <BuyForm
-                onClose={() => router.push("/account")}
-                stepperRef={stepperRef}
-              />
+              <BuyForm onClose={() => router.push("/account")} stepperRef={stepperRef} />
             </div>
           </div>
         </div>

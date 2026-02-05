@@ -1,5 +1,8 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import AnimatedBackground from "@/components/animated-background";
 import { motion } from "framer-motion";
 import Image from "next/image";
@@ -30,16 +33,16 @@ export default function Splash() {
             </div>
 
             <div className="mt-4 text-2xl font-semibold">RemittEase</div>
-            <div className="mt-1 text-sm re-subtle">Cross-border payments, done properly.</div>
+            <div className="mt-1 text-sm re-subtle">
+              Cross-border payments, done properly.
+            </div>
           </div>
 
           <div className="mt-7 text-center">
             <h1 className="text-2xl font-semibold leading-tight">
               Send and receive across countries — fast.
             </h1>
-            <p className="mt-2 text-sm re-subtle">
-              Simple from the first tap.
-            </p>
+            <p className="mt-2 text-sm re-subtle">Simple from the first tap.</p>
           </div>
 
           <div className="mt-8 space-y-3">
@@ -54,9 +57,7 @@ export default function Splash() {
               I already have an account
             </Link>
 
-            <p className="text-center text-xs re-subtle">
-              Secure sign-in • No long forms
-            </p>
+            <p className="text-center text-xs re-subtle">Secure sign-in • No long forms</p>
           </div>
         </motion.div>
       </div>

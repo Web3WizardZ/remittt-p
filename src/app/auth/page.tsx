@@ -1,5 +1,8 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import AnimatedBackground from "@/components/animated-background";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -11,7 +14,6 @@ export default function AuthPage() {
   const router = useRouter();
   const magic = useMemo(() => getMagic(), []);
 
-  // ✅ string, not nullable
   const [email, setEmail] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -44,14 +46,11 @@ export default function AuthPage() {
       const normalizedEmail = email.trim();
       if (!normalizedEmail) throw new Error("Please enter your email");
 
-      // ✅ loginWithEmailOTP returns a string DID token
       const didToken = await magic.auth.loginWithEmailOTP({
         email: normalizedEmail,
       });
 
-      // extra safety
       if (!didToken) throw new Error("Missing DID token");
-
       await completeLogin(didToken);
     } catch (e: any) {
       setErr(e?.message ?? "Login failed");
@@ -91,10 +90,13 @@ export default function AuthPage() {
 
           <div className="mt-7 space-y-3">
             <label className="block text-xs text-[var(--re-muted)]">Email</label>
+
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
+              inputMode="email"
+              autoComplete="email"
               className="w-full rounded-2xl border border-[var(--re-border)] bg-white/70 px-4 py-3 text-sm outline-none"
             />
 

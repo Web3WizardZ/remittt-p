@@ -1,5 +1,8 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import AnimatedBackground from "@/components/animated-background";
 import Link from "next/link";
 
@@ -14,7 +17,10 @@ export default function SendPage() {
             Next: recipient, amount, and confirmation flow.
           </div>
 
-          <Link href="/account" className="mt-6 inline-block font-semibold text-[var(--re-primary)]">
+          <Link
+            href="/account"
+            className="mt-6 inline-block font-semibold text-[var(--re-primary)]"
+          >
             Back to account
           </Link>
         </div>

@@ -1,13 +1,8 @@
-import { Suspense } from "react";
-import DepositClient from "./DepositClient";
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+import DepositClient from "./DepositClient";
+
 export default function Page() {
-  return (
-    <Suspense fallback={<div className="min-h-screen" />}>
-      <DepositClient />
-    </Suspense>
-  );
+  return <DepositClient />;
 }

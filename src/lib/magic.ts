@@ -1,14 +1,18 @@
-// src/lib/magic.ts
-import { Magic } from "magic-sdk";
+import type { Metadata } from "next";
+import "./globals.css";
+import Providers from "./providers";
 
-let magic: Magic | null = null;
+export const metadata: Metadata = {
+  title: "RemittEase",
+  description: "Send money globally with ease",
+};
 
-export function getMagic() {
-  if (typeof window === "undefined") return null;
-  if (!magic) {
-    const key = process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY;
-    if (!key) throw new Error("Missing NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY");
-    magic = new Magic(key);
-  }
-  return magic;
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <Providers>{children}</Providers>
+      </body>
+    </html>
+  );
 }

@@ -1,17 +1,21 @@
 "use client";
 
-import AnimatedBackground from "@/components/animated-background";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
 
+const AnimatedBackground = dynamic(
+  () => import("@/components/animated-background"),
+  { ssr: false }
+);
+
 export default function AuthClient() {
   const router = useRouter();
   const magic = useMemo(() => getMagic(), []);
-
-  const [email, setEmail] = useState<string>("");
+  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -23,32 +27,19 @@ export default function AuthClient() {
     })();
   }, [magic, router]);
 
-  const completeLogin = async (didToken: string) => {
-    const res = await fetch("/api/auth/magic", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ didToken }),
-    });
-    if (!res.ok) throw new Error("Server login failed");
-    router.replace("/account");
-  };
-
   const loginEmailOtp = async () => {
     setErr(null);
     setLoading(true);
-
     try {
-      if (!magic) throw new Error("Magic not ready");
+      if (!magic) throw new Error("Magic not configured");
 
       const normalizedEmail = email.trim();
       if (!normalizedEmail) throw new Error("Please enter your email");
 
-      const didToken = await magic.auth.loginWithEmailOTP({
-        email: normalizedEmail,
-      });
+      await magic.auth.loginWithEmailOTP({ email: normalizedEmail });
 
-      if (!didToken) throw new Error("Missing DID token");
-      await completeLogin(didToken);
+      // Logged in — go to account
+      router.replace("/account");
     } catch (e: any) {
       setErr(e?.message ?? "Login failed");
     } finally {
@@ -79,7 +70,9 @@ export default function AuthClient() {
               />
             </div>
 
-            <div className="mt-4 text-xl font-semibold">Welcome to RemittEase</div>
+            <div className="mt-4 text-xl font-semibold">
+              Welcome to RemittEase
+            </div>
             <div className="mt-1 text-sm text-[var(--re-muted)]">
               Cross-border payments, done properly.
             </div>
@@ -87,13 +80,10 @@ export default function AuthClient() {
 
           <div className="mt-7 space-y-3">
             <label className="block text-xs text-[var(--re-muted)]">Email</label>
-
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              inputMode="email"
-              autoComplete="email"
               className="w-full rounded-2xl border border-[var(--re-border)] bg-white/70 px-4 py-3 text-sm outline-none"
             />
 

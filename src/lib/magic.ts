@@ -1,21 +1,35 @@
-// src/lib/magic.ts
 import { Magic } from "magic-sdk";
+import { EVMExtension } from "@magic-ext/evm";
 
-let magic: Magic | null = null;
+let magic: Magic<EVMExtension[]> | null = null;
 
 export function getMagic() {
   if (typeof window === "undefined") return null;
 
-  const key = process.env.NEXT_PUBLIC_MAGIC_API_KEY;
-  if (!key) return null;
-
   if (!magic) {
+    const key = process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY;
+    if (!key) throw new Error("Missing NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY");
+
+    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL;
+    const chainIdStr = process.env.NEXT_PUBLIC_CHAIN_ID;
+
+    if (!rpcUrl) throw new Error("Missing NEXT_PUBLIC_RPC_URL");
+    if (!chainIdStr) throw new Error("Missing NEXT_PUBLIC_CHAIN_ID");
+
+    const chainId = Number(chainIdStr);
+
     magic = new Magic(key, {
-      network: {
-        rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.sepolia.org",
-        chainId: Number(process.env.NEXT_PUBLIC_CHAIN_ID || 11155111),
-      },
+      extensions: [
+        // ✅ IMPORTANT: array passed directly (NOT { network: [...] })
+        new EVMExtension([
+          {
+            rpcUrl,
+            chainId,
+          },
+        ]),
+      ],
     });
   }
+
   return magic;
 }

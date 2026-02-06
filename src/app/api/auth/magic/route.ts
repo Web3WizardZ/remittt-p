@@ -1,26 +1,26 @@
-// src/app/api/auth/magic/route.ts
 import { NextResponse } from "next/server";
 import { Magic } from "@magic-sdk/admin";
 
 const magicAdmin = new Magic(process.env.MAGIC_SECRET_KEY!);
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const { didToken } = await req.json();
+  const { idToken } = await req.json();
 
-  if (!didToken) {
-    return NextResponse.json({ error: "Missing didToken" }, { status: 400 });
+  if (!idToken) {
+    return NextResponse.json({ error: "Missing idToken" }, { status: 400 });
   }
 
   try {
-    await magicAdmin.token.validate(didToken);
-    const issuer = await magicAdmin.token.getIssuer(didToken);
+    // ✅ validate the ID token
+    magicAdmin.token.validate(idToken);
 
-    // TODO: set a secure session cookie here (JWT or iron-session, etc.)
-    // For now return issuer so you can confirm it works end-to-end.
+    const issuer = magicAdmin.token.getIssuer(idToken);
+
     return NextResponse.json({ ok: true, issuer });
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 }

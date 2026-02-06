@@ -1,21 +1,16 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import AnimatedBackground from "@/components/animated-background";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
 
-const AnimatedBackground = dynamic(
-  () => import("@/components/animated-background"),
-  { ssr: false }
-);
-
 export default function AuthClient() {
   const router = useRouter();
   const magic = useMemo(() => getMagic(), []);
-  const [email, setEmail] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -27,18 +22,30 @@ export default function AuthClient() {
     })();
   }, [magic, router]);
 
-  const loginEmailOtp = async () => {
+  const login = async () => {
     setErr(null);
     setLoading(true);
+
     try {
-      if (!magic) throw new Error("Magic not configured");
+      if (!magic) throw new Error("Magic not ready");
 
-      const normalizedEmail = email.trim();
-      if (!normalizedEmail) throw new Error("Please enter your email");
+      // ✅ Magic handles login UI (Email OTP, etc.) + provisions wallet
+      await (magic as any).wallet.connectWithUI();
 
-      await magic.auth.loginWithEmailOTP({ email: normalizedEmail });
+      // ✅ wallet should exist after connect
+      const info = await magic.user.getInfo();
+      const addr = (info as any)?.publicAddress as string | undefined;
+      if (!addr) throw new Error("Wallet address not created yet. Try again.");
 
-      // Logged in — go to account
+      // OPTIONAL: If you want a backend session, send an ID token to your API
+      const idToken = await magic.user.getIdToken();
+      const res = await fetch("/api/auth/magic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!res.ok) throw new Error("Server login failed");
+
       router.replace("/account");
     } catch (e: any) {
       setErr(e?.message ?? "Login failed");
@@ -60,33 +67,14 @@ export default function AuthClient() {
         >
           <div className="flex flex-col items-center text-center">
             <div className="h-14 w-14 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
-              <Image
-                src="/logo.png"
-                alt="RemittEase"
-                width={56}
-                height={56}
-                className="h-full w-full object-contain p-2"
-                priority
-              />
+              <Image src="/logo.png" alt="RemittEase" width={56} height={56} className="h-full w-full object-contain p-2" priority />
             </div>
 
-            <div className="mt-4 text-xl font-semibold">
-              Welcome to RemittEase
-            </div>
-            <div className="mt-1 text-sm text-[var(--re-muted)]">
-              Cross-border payments, done properly.
-            </div>
+            <div className="mt-4 text-xl font-semibold">Welcome to RemittEase</div>
+            <div className="mt-1 text-sm text-[var(--re-muted)]">Cross-border payments, done properly.</div>
           </div>
 
           <div className="mt-7 space-y-3">
-            <label className="block text-xs text-[var(--re-muted)]">Email</label>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full rounded-2xl border border-[var(--re-border)] bg-white/70 px-4 py-3 text-sm outline-none"
-            />
-
             {err ? (
               <div className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {err}
@@ -94,15 +82,15 @@ export default function AuthClient() {
             ) : null}
 
             <button
-              onClick={loginEmailOtp}
-              disabled={!email.trim() || loading}
+              onClick={login}
+              disabled={loading}
               className="w-full rounded-2xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
             >
-              {loading ? "Sending code…" : "Continue with Email"}
+              {loading ? "Opening login…" : "Continue"}
             </button>
 
             <p className="text-center text-xs text-[var(--re-muted)]">
-              You’ll receive a one-time code to verify your email.
+              Secure sign-in • Wallet created automatically
             </p>
           </div>
         </motion.div>

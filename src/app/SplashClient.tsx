@@ -1,14 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import AnimatedBackground from "@/components/animated-background";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
-
-const AnimatedBackground = dynamic(
-  () => import("@/components/animated-background"),
-  { ssr: false }
-);
 
 export default function SplashClient() {
   return (

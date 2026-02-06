@@ -1,6 +1,12 @@
 "use client";
 
-import AnimatedBackground from "@/components/animated-background";
+import dynamic from "next/dynamic";
+
+const AnimatedBackground = dynamic(
+  () => import("@/components/animated-background"),
+  { ssr: false }
+);
+
 import { motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";

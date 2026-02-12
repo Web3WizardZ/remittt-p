@@ -6,27 +6,12 @@ import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
-
-type InfoWithAddress = { publicAddress?: string; email?: string | null };
-
-async function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function getAddressWithRetry(magic: any, tries = 6, delayMs = 250) {
-  for (let i = 0; i < tries; i++) {
-    const info = (await magic.user.getInfo()) as InfoWithAddress;
-    if (info?.publicAddress) return info.publicAddress;
-    await sleep(delayMs);
-  }
-  return null;
-}
+import { waitForEvmAddress } from "@/lib/magicSession";
 
 export default function AuthClient() {
   const router = useRouter();
   const magic = useMemo(() => getMagic(), []);
 
-  const [checking, setChecking] = useState(true);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -34,18 +19,9 @@ export default function AuthClient() {
     let cancelled = false;
 
     (async () => {
-      try {
-        if (!magic) return;
-
-        const loggedIn = await magic.user.isLoggedIn();
-        if (!loggedIn) return;
-
-        // ✅ wait until wallet address is actually available (prevents ping-pong)
-        const addr = await getAddressWithRetry(magic);
-        if (addr && !cancelled) router.replace("/account");
-      } finally {
-        if (!cancelled) setChecking(false);
-      }
+      if (!magic) return;
+      const loggedIn = await magic.user.isLoggedIn();
+      if (!cancelled && loggedIn) router.replace("/account");
     })();
 
     return () => {
@@ -60,14 +36,14 @@ export default function AuthClient() {
     try {
       if (!magic) throw new Error("Magic not ready");
 
-      // ✅ Shows Magic login UI and provisions wallet
+      // Magic Login UI (Email OTP etc.)
       await (magic as any).wallet.connectWithUI();
 
-      // ✅ Wait for wallet address to exist (important)
-      const addr = await getAddressWithRetry(magic);
+      // ✅ Wait for address to be ready (prevents "not ready yet" + redirect loop)
+      const addr = await waitForEvmAddress(magic as any);
       if (!addr) throw new Error("Wallet address not ready yet. Please retry.");
 
-      // OPTIONAL: backend session
+      // OPTIONAL backend session (you can remove if not needed)
       const idToken = await magic.user.getIdToken();
       const res = await fetch("/api/auth/magic", {
         method: "POST",
@@ -84,7 +60,6 @@ export default function AuthClient() {
     }
   };
 
-  // ✅ While checking session, render the page (no redirect flapping)
   return (
     <main className="relative min-h-screen">
       <AnimatedBackground />
@@ -123,10 +98,10 @@ export default function AuthClient() {
 
             <button
               onClick={login}
-              disabled={loading || checking}
+              disabled={loading}
               className="w-full rounded-2xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
             >
-              {checking ? "Checking session…" : loading ? "Opening login…" : "Continue"}
+              {loading ? "Opening login…" : "Continue"}
             </button>
 
             <p className="text-center text-xs text-[var(--re-muted)]">

@@ -6,32 +6,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
+import { waitForEvmAddress } from "@/lib/magicSession";
 import { ArrowUpRight, ArrowDownLeft, Plus, UserRound } from "lucide-react";
-
-type InfoWithAddress = { publicAddress?: string; email?: string | null };
 
 function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
-}
-
-async function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function getInfoWithRetry(magic: any, tries = 6, delayMs = 250) {
-  for (let i = 0; i < tries; i++) {
-    const info = (await magic.user.getInfo()) as InfoWithAddress;
-    if (info?.publicAddress) return info;
-    await sleep(delayMs);
-  }
-  return null;
 }
 
 export default function AccountClient() {
   const router = useRouter();
   const magic = useMemo(() => getMagic(), []);
 
-  const [checking, setChecking] = useState(true);
+  const [ready, setReady] = useState(false);
   const [address, setAddress] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [copied, setCopied] = useState(false);
@@ -40,29 +26,29 @@ export default function AccountClient() {
     let cancelled = false;
 
     (async () => {
-      try {
-        if (!magic) return;
+      if (!magic) return;
 
-        const loggedIn = await magic.user.isLoggedIn();
-        if (!loggedIn) {
-          if (!cancelled) router.replace("/auth");
-          return;
-        }
-
-        // ✅ wait for address (prevents bounce back to /auth)
-        const info = await getInfoWithRetry(magic);
-        if (!info?.publicAddress) {
-          if (!cancelled) router.replace("/auth");
-          return;
-        }
-
-        if (!cancelled) {
-          setAddress(info.publicAddress);
-          setEmail(info.email ?? "");
-        }
-      } finally {
-        if (!cancelled) setChecking(false);
+      const loggedIn = await magic.user.isLoggedIn();
+      if (!loggedIn) {
+        if (!cancelled) router.replace("/auth");
+        return;
       }
+
+      // ✅ Wait briefly for address. Do NOT bounce back to /auth if empty.
+      const addr = await waitForEvmAddress(magic as any);
+      if (cancelled) return;
+
+      if (!addr) {
+        setReady(true);
+        return;
+      }
+
+      const info = await magic.user.getInfo();
+      const em = (info as any)?.email as string | undefined;
+
+      setAddress(addr);
+      setEmail(em ?? "");
+      setReady(true);
     })();
 
     return () => {
@@ -84,18 +70,37 @@ export default function AccountClient() {
     } catch {}
   };
 
-  if (checking) {
+  // Loading
+  if (!ready) return null;
+
+  // Logged in but address still not available (rare, but happens)
+  if (ready && !address) {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
-        <div className="mx-auto flex min-h-screen max-w-md items-center justify-center px-5">
-          <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-gray-200 border-t-black" />
+
+        <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
+          <div className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.15)]">
+            <div className="text-lg font-semibold">Finishing setup…</div>
+            <div className="mt-2 text-sm text-[var(--re-muted)]">
+              Your wallet is being provisioned. Refresh in a moment.
+            </div>
+
+            <button onClick={() => window.location.reload()} className="re-btn mt-5">
+              Refresh
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="mt-3 w-full rounded-full border border-[var(--re-border)] bg-white/70 px-5 py-3 text-sm font-semibold hover:bg-white/90"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </main>
     );
   }
-
-  if (!address) return null;
 
   const headerSub = email ? `Signed in as ${email}` : `Wallet ${shortAddr(address)}`;
 

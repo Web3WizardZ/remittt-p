@@ -16,7 +16,6 @@ function shortAddr(addr: string) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function forceEvmProvisioning(magic: any) {
-  // "Touch" the EVM provider; often finalizes wallet provisioning.
   try {
     await magic?.rpcProvider?.request?.({ method: "eth_requestAccounts" });
   } catch {
@@ -26,7 +25,7 @@ async function forceEvmProvisioning(magic: any) {
 
 async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
   for (let i = 0; i < tries; i++) {
-    const addr = await waitForEvmAddress(magic); // ✅ no opts (avoids TS WaitOpts mismatch)
+    const addr = await waitForEvmAddress(magic); // no opts
     if (addr && typeof addr === "string" && addr.startsWith("0x")) return addr;
     await sleep(delayMs);
   }
@@ -35,9 +34,23 @@ async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
 
 export default function AccountClient() {
   const router = useRouter();
-  const magic = useMemo(() => getMagic(), []);
+
+  // If getMagic() throws (env missing), it can crash render.
+  // We guard it so you SEE the error instead of a blank page.
+  const [magicInitError, setMagicInitError] = useState<string>("");
+  const magic = useMemo(() => {
+    try {
+      return getMagic();
+    } catch (e: any) {
+      setMagicInitError(e?.message ?? "Failed to initialize Magic");
+      return null as any;
+    }
+  }, []);
 
   const [ready, setReady] = useState(false);
+  const [phase, setPhase] = useState<
+    "init" | "check-login" | "get-info" | "auth" | "get-address" | "done"
+  >("init");
 
   const [address, setAddress] = useState<string>("");
   const [email, setEmail] = useState<string>("");
@@ -48,97 +61,117 @@ export default function AccountClient() {
     "idle" | "linking" | "linked" | "failed"
   >("idle");
 
+  const [error, setError] = useState<string>("");
+
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      if (!magic) return;
-
-      // 1) Must be logged in
-      const loggedIn = await magic.user.isLoggedIn();
-      if (!loggedIn) {
-        if (!cancelled) router.replace("/auth");
-        return;
-      }
-
-      // 2) Grab email ASAP (doesn't depend on wallet being ready)
       try {
-        const info = await magic.user.getInfo();
-        const em = (info as any)?.email as string | undefined;
-        if (!cancelled) setEmail(em ?? "");
-      } catch {}
+        if (!magic) {
+          setError(magicInitError || "Magic is not initialized");
+          return;
+        }
 
-      // 3) Validate session + get issuer from your current API route
-      let resolvedIssuer = "";
-      let idToken: string | null = null;
+        setPhase("check-login");
+        const loggedIn = await magic.user.isLoggedIn();
 
-      try {
-        idToken = await magic.user.getIdToken();
+        if (!loggedIn) {
+          if (!cancelled) router.replace("/auth");
+          return;
+        }
 
-        const res = await fetch("/api/auth", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken }),
-        });
+        setPhase("get-info");
+        try {
+          const info = await magic.user.getInfo();
+          const em = (info as any)?.email as string | undefined;
+          if (!cancelled) setEmail(em ?? "");
+        } catch {
+          // ok
+        }
 
-        if (res.ok) {
+        setPhase("auth");
+        let resolvedIssuer = "";
+        let idToken: string | null = null;
+
+        try {
+          idToken = await magic.user.getIdToken();
+
+          const res = await fetch("/api/auth", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken }),
+          });
+
+          if (!res.ok) {
+            const txt = await res.text().catch(() => "");
+            throw new Error(`Auth route failed: ${res.status} ${txt}`);
+          }
+
           const data = await res.json();
           resolvedIssuer = data?.issuer ?? "";
           if (!cancelled) setIssuer(resolvedIssuer);
+        } catch (e: any) {
+          // Not fatal for wallet display, but we surface it.
+          if (!cancelled) setError(e?.message ?? "Failed to validate session");
         }
-      } catch {
-        // ignore
-      }
 
-      // 4) Try to get address normally (no opts passed to avoid WaitOpts TS mismatch)
-      let addr = await waitAddrWithRetries(magic as any, 16, 250);
+        setPhase("get-address");
+        let addr = await waitAddrWithRetries(magic as any, 16, 250);
 
-      // 5) If still empty, force provisioning + try again
-      if (!addr) {
-        await forceEvmProvisioning(magic as any);
-        addr = await waitAddrWithRetries(magic as any, 20, 300);
-      }
+        if (!addr) {
+          await forceEvmProvisioning(magic as any);
+          addr = await waitAddrWithRetries(magic as any, 20, 300);
+        }
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (addr) {
-        setAddress(addr);
+        if (addr) {
+          setAddress(addr);
 
-        // Link on the client immediately so it reflects on the account page
-        if (resolvedIssuer) {
-          try {
-            setLinkStatus("linking");
-            const key = `re_wallet_${resolvedIssuer}`;
-            localStorage.setItem(key, addr);
-            setLinkStatus("linked");
-          } catch {
-            setLinkStatus("failed");
+          // Client-side linking (immediate reflect)
+          if (resolvedIssuer) {
+            try {
+              setLinkStatus("linking");
+              localStorage.setItem(`re_wallet_${resolvedIssuer}`, addr);
+              setLinkStatus("linked");
+            } catch {
+              setLinkStatus("failed");
+            }
           }
+
+          // If you created /api/account/wallet route, persist best-effort
+          // (won't break UI if missing)
+          if (idToken) {
+            try {
+              await fetch("/api/account/wallet", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ idToken, address: addr }),
+              });
+            } catch {
+              // ignore
+            }
+          }
+        } else {
+          // Still provisioning
+          setAddress("");
         }
 
-        // ✅ Persist to backend if you added /api/account/wallet
-        // (best-effort; UI should not depend on it)
-        if (idToken) {
-          try {
-            await fetch("/api/account/wallet", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ idToken, address: addr }),
-            });
-          } catch {}
+        setPhase("done");
+      } catch (e: any) {
+        if (!cancelled) {
+          setError(e?.message ?? "Unknown error on account page");
         }
-      } else {
-        // Still provisioning; keep address empty and show setup state
-        setAddress("");
+      } finally {
+        if (!cancelled) setReady(true);
       }
-
-      setReady(true);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [magic, router]);
+  }, [magic, magicInitError, router]);
 
   const handleLogout = async () => {
     if (!magic) return;
@@ -154,10 +187,39 @@ export default function AccountClient() {
     } catch {}
   };
 
-  // Loading
-  if (!ready) return null;
+  // ✅ Always show something (no more blank screen)
+  if (!ready) {
+    return (
+      <main className="relative min-h-screen">
+        <AnimatedBackground />
+        <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
+          <div className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.15)]">
+            <div className="text-lg font-semibold">Loading account…</div>
+            <div className="mt-2 text-sm text-[var(--re-muted)]">
+              Step: <span className="font-mono">{phase}</span>
+            </div>
 
-  // Logged in but address still not available (rare, but happens)
+            {(magicInitError || error) && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
+                <div className="font-semibold">Debug</div>
+                {magicInitError && <div className="mt-1">Magic: {magicInitError}</div>}
+                {error && <div className="mt-1">Error: {error}</div>}
+              </div>
+            )}
+
+            <button
+              onClick={() => window.location.reload()}
+              className="re-btn mt-5"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Logged in but address still not available
   if (ready && !address) {
     return (
       <main className="relative min-h-screen">
@@ -167,8 +229,16 @@ export default function AccountClient() {
           <div className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.15)]">
             <div className="text-lg font-semibold">Finishing setup…</div>
             <div className="mt-2 text-sm text-[var(--re-muted)]">
-              Your wallet is being provisioned. Refresh in a moment.
+              Wallet still provisioning. Step:{" "}
+              <span className="font-mono">{phase}</span>
             </div>
+
+            {error && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
+                <div className="font-semibold">Debug</div>
+                <div className="mt-1">{error}</div>
+              </div>
+            )}
 
             <button onClick={() => window.location.reload()} className="re-btn mt-5">
               Refresh
@@ -189,8 +259,8 @@ export default function AccountClient() {
   const headerSub = email
     ? `Signed in as ${email}`
     : issuer
-    ? `User ${issuer.slice(0, 10)}…`
-    : `Wallet ${shortAddr(address)}`;
+      ? `User ${issuer.slice(0, 10)}…`
+      : `Wallet ${shortAddr(address)}`;
 
   const showLinked =
     issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
@@ -236,15 +306,22 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Optional: issuer + link status */}
-        {(showLinked || showLinking || showFailed) && (
+        {/* Debug / status strip */}
+        {(error || showLinked || showLinking || showFailed) && (
           <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-xs">
-            <div className="font-semibold">
-              {showLinked || showLinking || showFailed}
-            </div>
+            {(showLinked || showLinking || showFailed) && (
+              <div className="font-semibold">
+                {showLinked || showLinking || showFailed}
+              </div>
+            )}
             {issuer && (
               <div className="mt-1 text-[var(--re-muted)]">
                 Issuer: <span className="font-mono">{issuer}</span>
+              </div>
+            )}
+            {error && (
+              <div className="mt-2 text-red-700">
+                Error: <span className="font-mono">{error}</span>
               </div>
             )}
           </div>

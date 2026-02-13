@@ -13,14 +13,40 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function forceEvmProvisioning(magic: any) {
+  // "Touch" the EVM provider; often finalizes wallet provisioning.
+  try {
+    await magic?.rpcProvider?.request?.({ method: "eth_requestAccounts" });
+  } catch {
+    // ignore
+  }
+}
+
+async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
+  for (let i = 0; i < tries; i++) {
+    const addr = await waitForEvmAddress(magic); // ✅ no opts (avoids TS WaitOpts mismatch)
+    if (addr && typeof addr === "string" && addr.startsWith("0x")) return addr;
+    await sleep(delayMs);
+  }
+  return null;
+}
+
 export default function AccountClient() {
   const router = useRouter();
   const magic = useMemo(() => getMagic(), []);
 
   const [ready, setReady] = useState(false);
+
   const [address, setAddress] = useState<string>("");
   const [email, setEmail] = useState<string>("");
+  const [issuer, setIssuer] = useState<string>("");
+
   const [copied, setCopied] = useState(false);
+  const [linkStatus, setLinkStatus] = useState<
+    "idle" | "linking" | "linked" | "failed"
+  >("idle");
 
   useEffect(() => {
     let cancelled = false;
@@ -28,26 +54,84 @@ export default function AccountClient() {
     (async () => {
       if (!magic) return;
 
+      // 1) Must be logged in
       const loggedIn = await magic.user.isLoggedIn();
       if (!loggedIn) {
         if (!cancelled) router.replace("/auth");
         return;
       }
 
-      // ✅ Wait briefly for address. Do NOT bounce back to /auth if empty.
-      const addr = await waitForEvmAddress(magic as any);
-      if (cancelled) return;
+      // 2) Grab email ASAP (doesn't depend on wallet being ready)
+      try {
+        const info = await magic.user.getInfo();
+        const em = (info as any)?.email as string | undefined;
+        if (!cancelled) setEmail(em ?? "");
+      } catch {}
 
-      if (!addr) {
-        setReady(true);
-        return;
+      // 3) Validate session + get issuer from your current API route
+      let resolvedIssuer = "";
+      let idToken: string | null = null;
+
+      try {
+        idToken = await magic.user.getIdToken();
+
+        const res = await fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          resolvedIssuer = data?.issuer ?? "";
+          if (!cancelled) setIssuer(resolvedIssuer);
+        }
+      } catch {
+        // ignore
       }
 
-      const info = await magic.user.getInfo();
-      const em = (info as any)?.email as string | undefined;
+      // 4) Try to get address normally (no opts passed to avoid WaitOpts TS mismatch)
+      let addr = await waitAddrWithRetries(magic as any, 16, 250);
 
-      setAddress(addr);
-      setEmail(em ?? "");
+      // 5) If still empty, force provisioning + try again
+      if (!addr) {
+        await forceEvmProvisioning(magic as any);
+        addr = await waitAddrWithRetries(magic as any, 20, 300);
+      }
+
+      if (cancelled) return;
+
+      if (addr) {
+        setAddress(addr);
+
+        // Link on the client immediately so it reflects on the account page
+        if (resolvedIssuer) {
+          try {
+            setLinkStatus("linking");
+            const key = `re_wallet_${resolvedIssuer}`;
+            localStorage.setItem(key, addr);
+            setLinkStatus("linked");
+          } catch {
+            setLinkStatus("failed");
+          }
+        }
+
+        // ✅ Persist to backend if you added /api/account/wallet
+        // (best-effort; UI should not depend on it)
+        if (idToken) {
+          try {
+            await fetch("/api/account/wallet", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken, address: addr }),
+            });
+          } catch {}
+        }
+      } else {
+        // Still provisioning; keep address empty and show setup state
+        setAddress("");
+      }
+
       setReady(true);
     })();
 
@@ -102,7 +186,20 @@ export default function AccountClient() {
     );
   }
 
-  const headerSub = email ? `Signed in as ${email}` : `Wallet ${shortAddr(address)}`;
+  const headerSub = email
+    ? `Signed in as ${email}`
+    : issuer
+    ? `User ${issuer.slice(0, 10)}…`
+    : `Wallet ${shortAddr(address)}`;
+
+  const showLinked =
+    issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
+  const showLinking =
+    issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
+  const showFailed =
+    issuer && linkStatus === "failed"
+      ? "⚠️ Could not save wallet locally (storage blocked)"
+      : "";
 
   return (
     <main className="relative min-h-screen">
@@ -138,6 +235,20 @@ export default function AccountClient() {
             Logout
           </button>
         </div>
+
+        {/* Optional: issuer + link status */}
+        {(showLinked || showLinking || showFailed) && (
+          <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-xs">
+            <div className="font-semibold">
+              {showLinked || showLinking || showFailed}
+            </div>
+            {issuer && (
+              <div className="mt-1 text-[var(--re-muted)]">
+                Issuer: <span className="font-mono">{issuer}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="mt-4 grid grid-cols-3 gap-3">

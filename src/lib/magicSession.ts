@@ -1,35 +1,52 @@
 import type { Magic } from "magic-sdk";
 
+type WaitOpts = {
+  timeoutMs?: number;
+  intervalMs?: number;
+};
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Tries to reliably obtain the user's EVM address.
+ * - First reads magic.user.getInfo().publicAddress
+ * - If missing, triggers EVM provider initialization (eth_requestAccounts)
+ * - Then polls until timeout
+ */
 export async function waitForEvmAddress(
-  magic: Magic<any>,
-  opts?: { retries?: number; delayMs?: number }
-): Promise<string | null> {
-  const retries = opts?.retries ?? 16;
-  const delayMs = opts?.delayMs ?? 250;
+  magic: Magic,
+  opts: WaitOpts = {},
+): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? 12_000;
+  const intervalMs = opts.intervalMs ?? 500;
 
-  for (let i = 0; i < retries; i++) {
-    try {
-      const isLoggedIn = await magic.user.isLoggedIn();
-      if (!isLoggedIn) return null;
+  const started = Date.now();
 
-      const evmAddr =
-        (magic as any).evm?.getPublicAddress
-          ? await (magic as any).evm.getPublicAddress()
-          : null;
+  const tryGet = async () => {
+    const info = await magic.user.getInfo();
+    const addr = (info as any)?.publicAddress as string | undefined;
+    return addr?.startsWith("0x") ? addr : "";
+  };
 
-      if (typeof evmAddr === "string" && evmAddr.startsWith("0x")) return evmAddr;
+  // 1) quick attempt
+  const first = await tryGet();
+  if (first) return first;
 
-      const info = await magic.user.getInfo();
-      const addr = (info as any)?.publicAddress as string | undefined;
-      if (addr && addr.startsWith("0x")) return addr;
-    } catch {}
-
-    await sleep(delayMs);
+  // 2) "touch" the EVM provider to force provisioning (safe to call even if already provisioned)
+  try {
+    await (magic as any).rpcProvider.request?.({ method: "eth_requestAccounts" });
+  } catch {
+    // ignore - we’ll still poll getInfo()
   }
 
-  return null;
+  // 3) poll
+  while (Date.now() - started < timeoutMs) {
+    const addr = await tryGet();
+    if (addr) return addr;
+    await sleep(intervalMs);
+  }
+
+  return "";
 }

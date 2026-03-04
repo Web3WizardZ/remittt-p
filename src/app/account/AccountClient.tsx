@@ -55,9 +55,9 @@ export default function AccountClient() {
   const [issuer, setIssuer] = useState<string>("");
 
   const [copied, setCopied] = useState(false);
-  const [linkStatus, setLinkStatus] = useState<"idle" | "linking" | "linked" | "failed">(
-    "idle"
-  );
+  const [linkStatus, setLinkStatus] = useState<
+    "idle" | "linking" | "linked" | "failed"
+  >("idle");
 
   const [error, setError] = useState<string>("");
 
@@ -88,7 +88,6 @@ export default function AccountClient() {
           // ok
         }
 
-        // Get token once (used for validate + save)
         const idToken = await magic.user.getIdToken();
 
         setPhase("validate");
@@ -101,7 +100,7 @@ export default function AccountClient() {
 
           if (!res.ok) {
             const txt = await res.text().catch(() => "");
-            throw new Error(`Auth route failed: ${res.status} ${txt}`);
+            throw new Error(`Auth failed: ${res.status} ${txt}`);
           }
 
           const data = await res.json();
@@ -171,63 +170,242 @@ export default function AccountClient() {
     } catch {}
   };
 
+  // ---------- FRIENDLY LOADING SCREEN ----------
   if (!ready) {
+    const title =
+      phase === "check-login"
+        ? "Checking your session…"
+        : phase === "get-info"
+        ? "Preparing your account…"
+        : phase === "validate"
+        ? "Securing your sign-in…"
+        : phase === "get-address"
+        ? "Setting up your wallet…"
+        : "Loading your account…";
+
+    const subtitle =
+      phase === "check-login"
+        ? "Just a moment while we verify you."
+        : phase === "get-info"
+        ? "Fetching your profile details."
+        : phase === "validate"
+        ? "Confirming your secure session."
+        : phase === "get-address"
+        ? "Creating your embedded wallet address."
+        : "Almost there.";
+
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
-        <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
-          <div className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.15)]">
-            <div className="text-lg font-semibold">Loading account…</div>
-            <div className="mt-2 text-sm text-[var(--re-muted)]">
-              Step: <span className="font-mono">{phase}</span>
+
+        <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
+          <div className="re-card rounded-3xl p-7">
+            {/* Brand */}
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
+                <Image
+                  src="/logo.png"
+                  alt="RemittEase"
+                  width={48}
+                  height={48}
+                  className="h-full w-full object-contain p-2"
+                  priority
+                />
+              </div>
+              <div>
+                <div className="text-lg font-semibold leading-tight">RemittEase</div>
+                <div className="text-xs re-subtle">Getting things ready</div>
+              </div>
             </div>
 
+            {/* Copy */}
+            <div className="mt-7">
+              <div className="text-2xl font-semibold leading-tight tracking-tight">
+                {title}
+              </div>
+              <div className="mt-2 text-sm re-subtle">{subtitle}</div>
+            </div>
+
+            {/* Progress */}
+            <div className="mt-6">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-black/10">
+                <div
+                  className="h-full w-1/3 rounded-full"
+                  style={{
+                    background: "var(--re-primary)",
+                    animation: "re-loading-bar 1.2s ease-in-out infinite",
+                  }}
+                />
+              </div>
+              <div className="mt-3 text-center text-xs re-subtle">
+                Please don’t close this page.
+              </div>
+            </div>
+
+            {/* Friendly error */}
             {(magicInitError || error) && (
-              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
-                <div className="font-semibold">Debug</div>
-                {magicInitError && <div className="mt-1">Magic: {magicInitError}</div>}
-                {error && <div className="mt-1">Error: {error}</div>}
+              <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <div className="font-semibold">We hit a snag</div>
+                <div className="mt-1">
+                  Please refresh the page. If it keeps happening, sign out and try again.
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="w-full rounded-2xl px-4 py-3 text-sm font-semibold text-white"
+                    style={{ background: "var(--re-primary)" }}
+                  >
+                    Refresh
+                  </button>
+
+                  <button
+                    onClick={handleLogout}
+                    className="w-full rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-sm font-semibold hover:bg-white/80"
+                  >
+                    Sign out
+                  </button>
+                </div>
+
+                <details className="mt-4 text-xs text-red-900/80">
+                  <summary className="cursor-pointer font-semibold">
+                    Technical details
+                  </summary>
+                  <div className="mt-2 font-mono whitespace-pre-wrap">
+                    {magicInitError ? `Magic: ${magicInitError}\n` : ""}
+                    {error ? `Error: ${error}` : ""}
+                  </div>
+                </details>
               </div>
             )}
-
-            <button onClick={() => window.location.reload()} className="re-btn mt-5">
-              Refresh
-            </button>
           </div>
+
+          <style jsx>{`
+            @keyframes re-loading-bar {
+              0% {
+                transform: translateX(-60%);
+                width: 35%;
+                opacity: 0.75;
+              }
+              50% {
+                transform: translateX(40%);
+                width: 55%;
+                opacity: 1;
+              }
+              100% {
+                transform: translateX(160%);
+                width: 35%;
+                opacity: 0.75;
+              }
+            }
+          `}</style>
         </div>
       </main>
     );
   }
 
+  // ---------- FRIENDLY "FINISHING SETUP" SCREEN ----------
   if (ready && !address) {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
-        <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
-          <div className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.15)]">
-            <div className="text-lg font-semibold">Finishing setup…</div>
-            <div className="mt-2 text-sm text-[var(--re-muted)]">
-              Wallet still provisioning. Step: <span className="font-mono">{phase}</span>
+
+        <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
+          <div className="re-card rounded-3xl p-7">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
+                <Image
+                  src="/logo.png"
+                  alt="RemittEase"
+                  width={48}
+                  height={48}
+                  className="h-full w-full object-contain p-2"
+                  priority
+                />
+              </div>
+              <div>
+                <div className="text-lg font-semibold leading-tight">RemittEase</div>
+                <div className="text-xs re-subtle">Almost ready</div>
+              </div>
+            </div>
+
+            <div className="mt-7">
+              <div className="text-2xl font-semibold leading-tight tracking-tight">
+                Finalizing your wallet…
+              </div>
+              <div className="mt-2 text-sm re-subtle">
+                This can take a few seconds the first time you sign in.
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-black/10">
+                <div
+                  className="h-full w-1/3 rounded-full"
+                  style={{
+                    background: "var(--re-primary)",
+                    animation: "re-loading-bar 1.2s ease-in-out infinite",
+                  }}
+                />
+              </div>
+              <div className="mt-3 text-center text-xs re-subtle">
+                Please keep this page open.
+              </div>
             </div>
 
             {error && (
-              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
-                <div className="font-semibold">Debug</div>
-                <div className="mt-1">{error}</div>
+              <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <div className="font-semibold">Still setting things up</div>
+                <div className="mt-1">
+                  If this takes longer than a minute, refresh or sign out and try again.
+                </div>
+
+                <details className="mt-4 text-xs text-red-900/80">
+                  <summary className="cursor-pointer font-semibold">
+                    Technical details
+                  </summary>
+                  <div className="mt-2 font-mono whitespace-pre-wrap">{error}</div>
+                </details>
               </div>
             )}
 
-            <button onClick={() => window.location.reload()} className="re-btn mt-5">
-              Refresh
-            </button>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full rounded-2xl px-4 py-3 text-sm font-semibold text-white"
+                style={{ background: "var(--re-primary)" }}
+              >
+                Refresh
+              </button>
 
-            <button
-              onClick={handleLogout}
-              className="mt-3 w-full rounded-full border border-[var(--re-border)] bg-white/70 px-5 py-3 text-sm font-semibold hover:bg-white/90"
-            >
-              Logout
-            </button>
+              <button
+                onClick={handleLogout}
+                className="w-full rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-sm font-semibold hover:bg-white/80"
+              >
+                Sign out
+              </button>
+            </div>
           </div>
+
+          <style jsx>{`
+            @keyframes re-loading-bar {
+              0% {
+                transform: translateX(-60%);
+                width: 35%;
+                opacity: 0.75;
+              }
+              50% {
+                transform: translateX(40%);
+                width: 55%;
+                opacity: 1;
+              }
+              100% {
+                transform: translateX(160%);
+                width: 35%;
+                opacity: 0.75;
+              }
+            }
+          `}</style>
         </div>
       </main>
     );
@@ -240,7 +418,8 @@ export default function AccountClient() {
     : `Wallet ${shortAddr(address)}`;
 
   const showLinked = issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
-  const showLinking = issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
+  const showLinking =
+    issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
   const showFailed =
     issuer && linkStatus === "failed"
       ? "⚠️ Could not save wallet locally (storage blocked)"
@@ -251,6 +430,7 @@ export default function AccountClient() {
       <AnimatedBackground />
 
       <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
@@ -280,6 +460,7 @@ export default function AccountClient() {
           </button>
         </div>
 
+        {/* Status strip */}
         {(error || showLinked || showLinking || showFailed) && (
           <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-xs">
             {(showLinked || showLinking || showFailed) && (
@@ -298,6 +479,7 @@ export default function AccountClient() {
           </div>
         )}
 
+        {/* Actions */}
         <div className="mt-4 grid grid-cols-3 gap-3">
           <button
             onClick={() => router.push("/send")}
@@ -327,6 +509,7 @@ export default function AccountClient() {
           </button>
         </div>
 
+        {/* Wallet */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="text-xs text-[var(--re-muted)]">Wallet address</div>
 

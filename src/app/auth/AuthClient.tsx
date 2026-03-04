@@ -83,43 +83,67 @@ export default function AuthClient() {
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55 }}
-          className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(17,24,39,0.15)]"
+          className="re-card rounded-3xl p-7"
         >
-          <div className="flex flex-col items-center text-center">
-            <div className="h-14 w-14 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
+          {/* Brand header */}
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
               <Image
                 src="/logo.png"
                 alt="RemittEase"
-                width={56}
-                height={56}
+                width={48}
+                height={48}
                 className="h-full w-full object-contain p-2"
                 priority
               />
             </div>
 
-            <div className="mt-4 text-xl font-semibold">Welcome to RemittEase</div>
-            <div className="mt-1 text-sm text-[var(--re-muted)]">
-              Cross-border payments, done properly.
+            <div>
+              <div className="text-lg font-semibold leading-tight">RemittEase</div>
+              <div className="text-xs re-subtle">Secure sign-in</div>
             </div>
           </div>
 
-          <div className="mt-7 space-y-3">
-            {err ? (
-              <div className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {err}
-              </div>
-            ) : null}
+          {/* Message */}
+          <div className="mt-7">
+            <h1 className="text-2xl font-semibold leading-tight tracking-tight">
+              Continue to your account
+            </h1>
+            <p className="mt-2 text-sm re-subtle">
+              One-time code. Wallet created automatically.
+            </p>
+          </div>
 
+          {/* Error */}
+          {err ? (
+            <div className="mt-5 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {err}
+            </div>
+          ) : null}
+
+          {/* Actions */}
+          <div className="mt-6 space-y-3">
             <button
               onClick={login}
               disabled={loading}
-              className="w-full rounded-2xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              className="w-full rounded-2xl px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              style={{
+                background: "var(--re-primary)",
+              }}
             >
               {loading ? "Opening login…" : "Continue"}
             </button>
 
-            <p className="text-center text-xs text-[var(--re-muted)]">
-              Secure sign-in • Wallet created automatically
+            <button
+              type="button"
+              onClick={() => router.replace("/")}
+              className="w-full rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-sm font-semibold hover:bg-white/80"
+            >
+              Back
+            </button>
+
+            <p className="text-center text-xs re-subtle">
+              No passwords • Secure login
             </p>
           </div>
         </motion.div>

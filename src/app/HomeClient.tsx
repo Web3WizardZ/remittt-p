@@ -1,11 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-
-const AnimatedBackground = dynamic(
-  () => import("@/components/animated-background"),
-  { ssr: false }
-);
+const AnimatedBackground = dynamic(() => import("@/components/animated-background"), {
+  ssr: false,
+});
 
 import { motion } from "framer-motion";
 import Image from "next/image";
@@ -23,29 +21,35 @@ export default function HomeClient() {
           transition={{ duration: 0.55 }}
           className="re-card rounded-3xl p-7"
         >
-          <div className="flex flex-col items-center text-center">
-            <div className="h-16 w-16 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
+          {/* Brand */}
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
               <Image
                 src="/logo.png"
                 alt="RemittEase"
-                width={64}
-                height={64}
+                width={48}
+                height={48}
                 className="h-full w-full object-contain p-2"
                 priority
               />
             </div>
-
-            <div className="mt-4 text-2xl font-semibold">RemittEase</div>
-            <div className="mt-1 text-sm re-subtle">Cross-border payments, done properly.</div>
+            <div>
+              <div className="text-lg font-semibold leading-tight">RemittEase</div>
+              <div className="text-xs re-subtle">Cross-border payments</div>
+            </div>
           </div>
 
-          <div className="mt-7 text-center">
-            <h1 className="text-2xl font-semibold leading-tight">
-              Send and receive across countries — fast.
+          {/* Message */}
+          <div className="mt-8">
+            <h1 className="text-3xl font-semibold leading-tight tracking-tight">
+              Send money across borders.
             </h1>
-            <p className="mt-2 text-sm re-subtle">Simple from the first tap.</p>
+            <p className="mt-2 text-sm re-subtle">
+              Fast, simple, and built for everyday transfers.
+            </p>
           </div>
 
+          {/* CTAs */}
           <div className="mt-8 space-y-3">
             <Link href="/auth" className="re-btn block text-center">
               Get started
@@ -55,10 +59,12 @@ export default function HomeClient() {
               href="/auth"
               className="block text-center text-sm font-semibold text-[var(--re-primary)]"
             >
-              I already have an account
+              Sign in
             </Link>
 
-            <p className="text-center text-xs re-subtle">Secure sign-in • No long forms</p>
+            <p className="text-center text-xs re-subtle">
+              Secure sign-in • Wallet created automatically
+            </p>
           </div>
         </motion.div>
       </div>

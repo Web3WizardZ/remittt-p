@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
 import { waitForEvmAddress } from "@/lib/magicSession";
-import { ArrowUpRight, ArrowDownLeft, Plus, UserRound } from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, Plus, UserRound, RefreshCw } from "lucide-react";
 
 function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
@@ -30,6 +30,61 @@ async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
     await sleep(delayMs);
   }
   return "";
+}
+
+/** UI-safe conversion: wei (hex) -> native float */
+function weiHexToNativeFloat(balHex: string) {
+  const wei = BigInt(balHex);
+  // We only display; JS float is fine for UI
+  return Number(wei) / 1e18;
+}
+
+function formatUSD(n: number) {
+  if (!Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: n >= 1000 ? 0 : 2,
+  }).format(n);
+}
+
+function formatCrypto(n: number, symbol: string) {
+  if (!Number.isFinite(n)) return `— ${symbol}`;
+  const fmt = new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: n >= 1 ? 4 : 6,
+  }).format(n);
+  return `${fmt} ${symbol}`;
+}
+
+function chainMeta(chainId?: number): { symbol: string; coingeckoId: string } {
+  if (!chainId) return { symbol: "ETH", coingeckoId: "ethereum" };
+
+  // Ethereum family / L2s that use ETH as native gas
+  if ([1, 11155111, 17000, 8453, 84532, 10, 420, 42161, 421614].includes(chainId)) {
+    return { symbol: "ETH", coingeckoId: "ethereum" };
+  }
+
+  // Polygon (optional)
+  if ([137, 80001, 80002].includes(chainId)) return { symbol: "MATIC", coingeckoId: "matic-network" };
+
+  // Celo (optional)
+  if ([42220, 44787].includes(chainId)) return { symbol: "CELO", coingeckoId: "celo" };
+
+  // Default
+  return { symbol: "ETH", coingeckoId: "ethereum" };
+}
+
+async function fetchUsdPrice(coingeckoId: string): Promise<number> {
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
+    coingeckoId
+  )}&vs_currencies=usd`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("Price unavailable");
+  const data = await res.json();
+  const p = data?.[coingeckoId]?.usd;
+  if (typeof p !== "number") throw new Error("Price unavailable");
+  return p;
 }
 
 export default function AccountClient() {
@@ -55,12 +110,23 @@ export default function AccountClient() {
   const [issuer, setIssuer] = useState<string>("");
 
   const [copied, setCopied] = useState(false);
-  const [linkStatus, setLinkStatus] = useState<
-    "idle" | "linking" | "linked" | "failed"
-  >("idle");
+  const [linkStatus, setLinkStatus] = useState<"idle" | "linking" | "linked" | "failed">(
+    "idle"
+  );
 
   const [error, setError] = useState<string>("");
 
+  // ---- Balance state ----
+  const [balLoading, setBalLoading] = useState(false);
+  const [balError, setBalError] = useState("");
+  const [nativeSymbol, setNativeSymbol] = useState("ETH");
+  const [nativeAmount, setNativeAmount] = useState<number>(0);
+  const [usdAmount, setUsdAmount] = useState<number>(0);
+  const [priceUsd, setPriceUsd] = useState<number>(0);
+
+  const brandGradient = "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
+
+  // --------- Boot flow (login check -> issuer -> address) ----------
   useEffect(() => {
     let cancelled = false;
 
@@ -154,7 +220,55 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [magic, magicInitError, router]);
+  }, [magic, magicInitError, router, issuer]);
+
+  // --------- Balance loader (native + USD) ----------
+  const loadBalance = async () => {
+    if (!magic || !address) return;
+
+    setBalLoading(true);
+    setBalError("");
+
+    try {
+      const provider = (magic as any).rpcProvider;
+
+      // chain id
+      const chainIdHex: string = await provider.request({ method: "eth_chainId" });
+      const chainId = Number.parseInt(chainIdHex, 16);
+
+      const meta = chainMeta(chainId);
+      setNativeSymbol(meta.symbol);
+
+      // native balance
+      const balHex: string = await provider.request({
+        method: "eth_getBalance",
+        params: [address, "latest"],
+      });
+
+      const native = weiHexToNativeFloat(balHex);
+
+      // price
+      const p = await fetchUsdPrice(meta.coingeckoId);
+      const usd = native * p;
+
+      setNativeAmount(native);
+      setPriceUsd(p);
+      setUsdAmount(usd);
+    } catch (e: any) {
+      setBalError(e?.message ?? "Could not load balance");
+      setNativeAmount(0);
+      setUsdAmount(0);
+      setPriceUsd(0);
+    } finally {
+      setBalLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!magic || !address) return;
+    loadBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [magic, address]);
 
   const handleLogout = async () => {
     if (!magic) return;
@@ -200,7 +314,6 @@ export default function AccountClient() {
 
         <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
           <div className="re-card rounded-3xl p-7">
-            {/* Brand */}
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
                 <Image
@@ -218,15 +331,11 @@ export default function AccountClient() {
               </div>
             </div>
 
-            {/* Copy */}
             <div className="mt-7">
-              <div className="text-2xl font-semibold leading-tight tracking-tight">
-                {title}
-              </div>
+              <div className="text-2xl font-semibold leading-tight tracking-tight">{title}</div>
               <div className="mt-2 text-sm re-subtle">{subtitle}</div>
             </div>
 
-            {/* Progress */}
             <div className="mt-6">
               <div className="h-2 w-full overflow-hidden rounded-full bg-black/10">
                 <div
@@ -242,7 +351,6 @@ export default function AccountClient() {
               </div>
             </div>
 
-            {/* Friendly error */}
             {(magicInitError || error) && (
               <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                 <div className="font-semibold">We hit a snag</div>
@@ -268,9 +376,7 @@ export default function AccountClient() {
                 </div>
 
                 <details className="mt-4 text-xs text-red-900/80">
-                  <summary className="cursor-pointer font-semibold">
-                    Technical details
-                  </summary>
+                  <summary className="cursor-pointer font-semibold">Technical details</summary>
                   <div className="mt-2 font-mono whitespace-pre-wrap">
                     {magicInitError ? `Magic: ${magicInitError}\n` : ""}
                     {error ? `Error: ${error}` : ""}
@@ -359,13 +465,6 @@ export default function AccountClient() {
                 <div className="mt-1">
                   If this takes longer than a minute, refresh or sign out and try again.
                 </div>
-
-                <details className="mt-4 text-xs text-red-900/80">
-                  <summary className="cursor-pointer font-semibold">
-                    Technical details
-                  </summary>
-                  <div className="mt-2 font-mono whitespace-pre-wrap">{error}</div>
-                </details>
               </div>
             )}
 
@@ -418,8 +517,7 @@ export default function AccountClient() {
     : `Wallet ${shortAddr(address)}`;
 
   const showLinked = issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
-  const showLinking =
-    issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
+  const showLinking = issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
   const showFailed =
     issuer && linkStatus === "failed"
       ? "⚠️ Could not save wallet locally (storage blocked)"
@@ -478,6 +576,37 @@ export default function AccountClient() {
             )}
           </div>
         )}
+
+        {/* Balance (USD) */}
+        <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs text-[var(--re-muted)]">Account balance</div>
+              <div className="mt-2 text-3xl font-semibold tracking-tight">
+                {balLoading ? "Loading…" : formatUSD(usdAmount)}
+              </div>
+              <div className="mt-1 text-xs text-[var(--re-muted)]">
+                {balLoading ? "Fetching latest rate" : `${formatCrypto(nativeAmount, nativeSymbol)} • ${priceUsd ? `$${priceUsd.toFixed(2)} / ${nativeSymbol}` : "—"}`}
+              </div>
+              {balError ? (
+                <div className="mt-2 text-xs text-red-700">{balError}</div>
+              ) : null}
+            </div>
+
+            <button
+              onClick={loadBalance}
+              disabled={balLoading}
+              className="rounded-2xl px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              style={{ background: brandGradient }}
+              title="Refresh balance"
+            >
+              <span className="inline-flex items-center gap-2">
+                <RefreshCw className={`h-4 w-4 ${balLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </span>
+            </button>
+          </div>
+        </div>
 
         {/* Actions */}
         <div className="mt-4 grid grid-cols-3 gap-3">

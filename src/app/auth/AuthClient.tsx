@@ -36,22 +36,36 @@ export default function AuthClient() {
     try {
       if (!magic) throw new Error("Magic not ready");
 
-      // Magic Login UI (Email OTP etc.)
+      // 1) Open Magic Login UI (Email OTP etc.)
       await (magic as any).wallet.connectWithUI();
 
-      // ✅ Wait for address to be ready (prevents "not ready yet" + redirect loop)
+      // 2) Wait for embedded wallet address
       const addr = await waitForEvmAddress(magic as any);
       if (!addr) throw new Error("Wallet address not ready yet. Please retry.");
 
-      // OPTIONAL backend session (you can remove if not needed)
+      // 3) Get ID token
       const idToken = await magic.user.getIdToken();
+
+      // 4) Validate token / get issuer (DO NOT require address here)
       const res = await fetch("/api/auth/magic", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken }),
       });
-      if (!res.ok) throw new Error("Server login failed");
 
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Server login failed: ${res.status} ${txt}`);
+      }
+
+      // 5) Best-effort: persist wallet mapping (do not block redirect)
+      fetch("/api/account/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken, address: addr }),
+      }).catch(() => {});
+
+      // 6) Go to account page
       router.replace("/account");
     } catch (e: any) {
       setErr(e?.message ?? "Login failed");

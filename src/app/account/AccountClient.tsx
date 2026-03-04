@@ -25,18 +25,16 @@ async function forceEvmProvisioning(magic: any) {
 
 async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
   for (let i = 0; i < tries; i++) {
-    const addr = await waitForEvmAddress(magic); // no opts
+    const addr = await waitForEvmAddress(magic);
     if (addr && typeof addr === "string" && addr.startsWith("0x")) return addr;
     await sleep(delayMs);
   }
-  return null;
+  return "";
 }
 
 export default function AccountClient() {
   const router = useRouter();
 
-  // If getMagic() throws (env missing), it can crash render.
-  // We guard it so you SEE the error instead of a blank page.
   const [magicInitError, setMagicInitError] = useState<string>("");
   const magic = useMemo(() => {
     try {
@@ -49,7 +47,7 @@ export default function AccountClient() {
 
   const [ready, setReady] = useState(false);
   const [phase, setPhase] = useState<
-    "init" | "check-login" | "get-info" | "auth" | "get-address" | "done"
+    "init" | "check-login" | "get-info" | "validate" | "get-address" | "done"
   >("init");
 
   const [address, setAddress] = useState<string>("");
@@ -57,9 +55,9 @@ export default function AccountClient() {
   const [issuer, setIssuer] = useState<string>("");
 
   const [copied, setCopied] = useState(false);
-  const [linkStatus, setLinkStatus] = useState<
-    "idle" | "linking" | "linked" | "failed"
-  >("idle");
+  const [linkStatus, setLinkStatus] = useState<"idle" | "linking" | "linked" | "failed">(
+    "idle"
+  );
 
   const [error, setError] = useState<string>("");
 
@@ -90,14 +88,12 @@ export default function AccountClient() {
           // ok
         }
 
-        setPhase("auth");
-        let resolvedIssuer = "";
-        let idToken: string | null = null;
+        // Get token once (used for validate + save)
+        const idToken = await magic.user.getIdToken();
 
+        setPhase("validate");
         try {
-          idToken = await magic.user.getIdToken();
-
-          const res = await fetch("/api/auth", {
+          const res = await fetch("/api/auth/magic", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ idToken }),
@@ -109,10 +105,8 @@ export default function AccountClient() {
           }
 
           const data = await res.json();
-          resolvedIssuer = data?.issuer ?? "";
-          if (!cancelled) setIssuer(resolvedIssuer);
+          if (!cancelled) setIssuer(data?.issuer ?? "");
         } catch (e: any) {
-          // Not fatal for wallet display, but we surface it.
           if (!cancelled) setError(e?.message ?? "Failed to validate session");
         }
 
@@ -129,40 +123,30 @@ export default function AccountClient() {
         if (addr) {
           setAddress(addr);
 
-          // Client-side linking (immediate reflect)
-          if (resolvedIssuer) {
+          // local reflect (optional)
+          if (issuer) {
             try {
               setLinkStatus("linking");
-              localStorage.setItem(`re_wallet_${resolvedIssuer}`, addr);
+              localStorage.setItem(`re_wallet_${issuer}`, addr);
               setLinkStatus("linked");
             } catch {
               setLinkStatus("failed");
             }
           }
 
-          // If you created /api/account/wallet route, persist best-effort
-          // (won't break UI if missing)
-          if (idToken) {
-            try {
-              await fetch("/api/account/wallet", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ idToken, address: addr }),
-              });
-            } catch {
-              // ignore
-            }
-          }
+          // best-effort save to backend
+          fetch("/api/account/wallet", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken, address: addr }),
+          }).catch(() => {});
         } else {
-          // Still provisioning
           setAddress("");
         }
 
         setPhase("done");
       } catch (e: any) {
-        if (!cancelled) {
-          setError(e?.message ?? "Unknown error on account page");
-        }
+        if (!cancelled) setError(e?.message ?? "Unknown error on account page");
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -171,7 +155,7 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [magic, magicInitError, router]);
+  }, [magic, magicInitError, router, issuer]);
 
   const handleLogout = async () => {
     if (!magic) return;
@@ -187,7 +171,6 @@ export default function AccountClient() {
     } catch {}
   };
 
-  // ✅ Always show something (no more blank screen)
   if (!ready) {
     return (
       <main className="relative min-h-screen">
@@ -207,10 +190,7 @@ export default function AccountClient() {
               </div>
             )}
 
-            <button
-              onClick={() => window.location.reload()}
-              className="re-btn mt-5"
-            >
+            <button onClick={() => window.location.reload()} className="re-btn mt-5">
               Refresh
             </button>
           </div>
@@ -219,18 +199,15 @@ export default function AccountClient() {
     );
   }
 
-  // Logged in but address still not available
   if (ready && !address) {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
-
         <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
           <div className="rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.15)]">
             <div className="text-lg font-semibold">Finishing setup…</div>
             <div className="mt-2 text-sm text-[var(--re-muted)]">
-              Wallet still provisioning. Step:{" "}
-              <span className="font-mono">{phase}</span>
+              Wallet still provisioning. Step: <span className="font-mono">{phase}</span>
             </div>
 
             {error && (
@@ -259,13 +236,11 @@ export default function AccountClient() {
   const headerSub = email
     ? `Signed in as ${email}`
     : issuer
-      ? `User ${issuer.slice(0, 10)}…`
-      : `Wallet ${shortAddr(address)}`;
+    ? `User ${issuer.slice(0, 10)}…`
+    : `Wallet ${shortAddr(address)}`;
 
-  const showLinked =
-    issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
-  const showLinking =
-    issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
+  const showLinked = issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
+  const showLinking = issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
   const showFailed =
     issuer && linkStatus === "failed"
       ? "⚠️ Could not save wallet locally (storage blocked)"
@@ -276,7 +251,6 @@ export default function AccountClient() {
       <AnimatedBackground />
 
       <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
@@ -306,13 +280,10 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Debug / status strip */}
         {(error || showLinked || showLinking || showFailed) && (
           <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-xs">
             {(showLinked || showLinking || showFailed) && (
-              <div className="font-semibold">
-                {showLinked || showLinking || showFailed}
-              </div>
+              <div className="font-semibold">{showLinked || showLinking || showFailed}</div>
             )}
             {issuer && (
               <div className="mt-1 text-[var(--re-muted)]">
@@ -327,7 +298,6 @@ export default function AccountClient() {
           </div>
         )}
 
-        {/* Actions */}
         <div className="mt-4 grid grid-cols-3 gap-3">
           <button
             onClick={() => router.push("/send")}
@@ -357,7 +327,6 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Wallet */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="text-xs text-[var(--re-muted)]">Wallet address</div>
 

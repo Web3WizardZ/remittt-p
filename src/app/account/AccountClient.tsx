@@ -155,7 +155,7 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [magic, magicInitError, router, issuer]);
+  }, [magic, magicInitError, router]);
 
   const handleLogout = async () => {
     if (!magic) return;

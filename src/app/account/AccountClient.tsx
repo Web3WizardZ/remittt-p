@@ -1,3 +1,4 @@
+// src/app/account/AccountClient.tsx
 "use client";
 
 import AnimatedBackground from "@/components/animated-background";
@@ -7,7 +8,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
 import { waitForEvmAddress } from "@/lib/magicSession";
-import { ArrowUpRight, ArrowDownLeft, Plus, UserRound, RefreshCw } from "lucide-react";
+import { ethers } from "ethers";
+import { ArrowUpRight, ArrowDownLeft, Plus, UserRound } from "lucide-react";
 
 function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
@@ -18,9 +20,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function forceEvmProvisioning(magic: any) {
   try {
     await magic?.rpcProvider?.request?.({ method: "eth_requestAccounts" });
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
@@ -32,13 +32,6 @@ async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
   return "";
 }
 
-/** UI-safe conversion: wei (hex) -> native float */
-function weiHexToNativeFloat(balHex: string) {
-  const wei = BigInt(balHex);
-  // We only display; JS float is fine for UI
-  return Number(wei) / 1e18;
-}
-
 function formatUSD(n: number) {
   if (!Number.isFinite(n)) return "—";
   return new Intl.NumberFormat("en-US", {
@@ -48,43 +41,11 @@ function formatUSD(n: number) {
   }).format(n);
 }
 
-function formatCrypto(n: number, symbol: string) {
-  if (!Number.isFinite(n)) return `— ${symbol}`;
-  const fmt = new Intl.NumberFormat("en-US", {
+function formatEth(n: number) {
+  if (!Number.isFinite(n)) return "— ETH";
+  return `${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: n >= 1 ? 4 : 6,
-  }).format(n);
-  return `${fmt} ${symbol}`;
-}
-
-function chainMeta(chainId?: number): { symbol: string; coingeckoId: string } {
-  if (!chainId) return { symbol: "ETH", coingeckoId: "ethereum" };
-
-  // Ethereum family / L2s that use ETH as native gas
-  if ([1, 11155111, 17000, 8453, 84532, 10, 420, 42161, 421614].includes(chainId)) {
-    return { symbol: "ETH", coingeckoId: "ethereum" };
-  }
-
-  // Polygon (optional)
-  if ([137, 80001, 80002].includes(chainId)) return { symbol: "MATIC", coingeckoId: "matic-network" };
-
-  // Celo (optional)
-  if ([42220, 44787].includes(chainId)) return { symbol: "CELO", coingeckoId: "celo" };
-
-  // Default
-  return { symbol: "ETH", coingeckoId: "ethereum" };
-}
-
-async function fetchUsdPrice(coingeckoId: string): Promise<number> {
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
-    coingeckoId
-  )}&vs_currencies=usd`;
-
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error("Price unavailable");
-  const data = await res.json();
-  const p = data?.[coingeckoId]?.usd;
-  if (typeof p !== "number") throw new Error("Price unavailable");
-  return p;
+  }).format(n)} ETH`;
 }
 
 export default function AccountClient() {
@@ -116,17 +77,15 @@ export default function AccountClient() {
 
   const [error, setError] = useState<string>("");
 
-  // ---- Balance state ----
+  // Balance
   const [balLoading, setBalLoading] = useState(false);
   const [balError, setBalError] = useState("");
-  const [nativeSymbol, setNativeSymbol] = useState("ETH");
-  const [nativeAmount, setNativeAmount] = useState<number>(0);
-  const [usdAmount, setUsdAmount] = useState<number>(0);
-  const [priceUsd, setPriceUsd] = useState<number>(0);
+  const [ethAmount, setEthAmount] = useState(0);
+  const [usdAmount, setUsdAmount] = useState(0);
+  const [ethPriceUsd, setEthPriceUsd] = useState(0);
 
   const brandGradient = "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
 
-  // --------- Boot flow (login check -> issuer -> address) ----------
   useEffect(() => {
     let cancelled = false;
 
@@ -150,9 +109,7 @@ export default function AccountClient() {
           const info = await magic.user.getInfo();
           const em = (info as any)?.email as string | undefined;
           if (!cancelled) setEmail(em ?? "");
-        } catch {
-          // ok
-        }
+        } catch {}
 
         const idToken = await magic.user.getIdToken();
 
@@ -188,7 +145,6 @@ export default function AccountClient() {
         if (addr) {
           setAddress(addr);
 
-          // local reflect (optional)
           if (issuer) {
             try {
               setLinkStatus("linking");
@@ -199,7 +155,6 @@ export default function AccountClient() {
             }
           }
 
-          // best-effort save to backend
           fetch("/api/account/wallet", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -222,43 +177,35 @@ export default function AccountClient() {
     };
   }, [magic, magicInitError, router, issuer]);
 
-  // --------- Balance loader (native + USD) ----------
   const loadBalance = async () => {
-    if (!magic || !address) return;
+    if (!magic) return;
 
     setBalLoading(true);
     setBalError("");
 
     try {
-      const provider = (magic as any).rpcProvider;
+      const provider = new ethers.BrowserProvider((magic as any).rpcProvider);
+      const signer = await provider.getSigner();
+      const addr = await signer.getAddress();
 
-      // chain id
-      const chainIdHex: string = await provider.request({ method: "eth_chainId" });
-      const chainId = Number.parseInt(chainIdHex, 16);
+      const balWei = await provider.getBalance(addr);
+      const eth = Number(ethers.formatEther(balWei));
 
-      const meta = chainMeta(chainId);
-      setNativeSymbol(meta.symbol);
+      const priceRes = await fetch("/api/price/eth", { cache: "no-store" });
+      const priceJson = await priceRes.json().catch(() => ({}));
+      if (!priceRes.ok) throw new Error(priceJson?.error ?? "Price unavailable");
 
-      // native balance
-      const balHex: string = await provider.request({
-        method: "eth_getBalance",
-        params: [address, "latest"],
-      });
+      const price = Number(priceJson?.usd ?? 0);
+      const usd = eth * price;
 
-      const native = weiHexToNativeFloat(balHex);
-
-      // price
-      const p = await fetchUsdPrice(meta.coingeckoId);
-      const usd = native * p;
-
-      setNativeAmount(native);
-      setPriceUsd(p);
+      setEthAmount(eth);
+      setEthPriceUsd(price);
       setUsdAmount(usd);
     } catch (e: any) {
       setBalError(e?.message ?? "Could not load balance");
-      setNativeAmount(0);
+      setEthAmount(0);
       setUsdAmount(0);
-      setPriceUsd(0);
+      setEthPriceUsd(0);
     } finally {
       setBalLoading(false);
     }
@@ -284,7 +231,6 @@ export default function AccountClient() {
     } catch {}
   };
 
-  // ---------- FRIENDLY LOADING SCREEN ----------
   if (!ready) {
     const title =
       phase === "check-login"
@@ -311,7 +257,6 @@ export default function AccountClient() {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
-
         <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
           <div className="re-card rounded-3xl p-7">
             <div className="flex items-center gap-3">
@@ -346,9 +291,7 @@ export default function AccountClient() {
                   }}
                 />
               </div>
-              <div className="mt-3 text-center text-xs re-subtle">
-                Please don’t close this page.
-              </div>
+              <div className="mt-3 text-center text-xs re-subtle">Please don’t close this page.</div>
             </div>
 
             {(magicInitError || error) && (
@@ -374,14 +317,6 @@ export default function AccountClient() {
                     Sign out
                   </button>
                 </div>
-
-                <details className="mt-4 text-xs text-red-900/80">
-                  <summary className="cursor-pointer font-semibold">Technical details</summary>
-                  <div className="mt-2 font-mono whitespace-pre-wrap">
-                    {magicInitError ? `Magic: ${magicInitError}\n` : ""}
-                    {error ? `Error: ${error}` : ""}
-                  </div>
-                </details>
               </div>
             )}
           </div>
@@ -410,63 +345,14 @@ export default function AccountClient() {
     );
   }
 
-  // ---------- FRIENDLY "FINISHING SETUP" SCREEN ----------
   if (ready && !address) {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
-
         <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
           <div className="re-card rounded-3xl p-7">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
-                <Image
-                  src="/logo.png"
-                  alt="RemittEase"
-                  width={48}
-                  height={48}
-                  className="h-full w-full object-contain p-2"
-                  priority
-                />
-              </div>
-              <div>
-                <div className="text-lg font-semibold leading-tight">RemittEase</div>
-                <div className="text-xs re-subtle">Almost ready</div>
-              </div>
-            </div>
-
-            <div className="mt-7">
-              <div className="text-2xl font-semibold leading-tight tracking-tight">
-                Finalizing your wallet…
-              </div>
-              <div className="mt-2 text-sm re-subtle">
-                This can take a few seconds the first time you sign in.
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-black/10">
-                <div
-                  className="h-full w-1/3 rounded-full"
-                  style={{
-                    background: "var(--re-primary)",
-                    animation: "re-loading-bar 1.2s ease-in-out infinite",
-                  }}
-                />
-              </div>
-              <div className="mt-3 text-center text-xs re-subtle">
-                Please keep this page open.
-              </div>
-            </div>
-
-            {error && (
-              <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                <div className="font-semibold">Still setting things up</div>
-                <div className="mt-1">
-                  If this takes longer than a minute, refresh or sign out and try again.
-                </div>
-              </div>
-            )}
+            <div className="text-2xl font-semibold">Finalizing your wallet…</div>
+            <div className="mt-2 text-sm re-subtle">This can take a few seconds the first time.</div>
 
             <div className="mt-6 grid grid-cols-2 gap-3">
               <button
@@ -485,26 +371,6 @@ export default function AccountClient() {
               </button>
             </div>
           </div>
-
-          <style jsx>{`
-            @keyframes re-loading-bar {
-              0% {
-                transform: translateX(-60%);
-                width: 35%;
-                opacity: 0.75;
-              }
-              50% {
-                transform: translateX(40%);
-                width: 55%;
-                opacity: 1;
-              }
-              100% {
-                transform: translateX(160%);
-                width: 35%;
-                opacity: 0.75;
-              }
-            }
-          `}</style>
         </div>
       </main>
     );
@@ -519,16 +385,13 @@ export default function AccountClient() {
   const showLinked = issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
   const showLinking = issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
   const showFailed =
-    issuer && linkStatus === "failed"
-      ? "⚠️ Could not save wallet locally (storage blocked)"
-      : "";
+    issuer && linkStatus === "failed" ? "⚠️ Could not save wallet locally (storage blocked)" : "";
 
   return (
     <main className="relative min-h-screen">
       <AnimatedBackground />
 
       <div className="mx-auto min-h-screen w-full max-w-md px-5 py-8">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 overflow-hidden rounded-2xl bg-white/80 ring-1 ring-black/10">
@@ -558,7 +421,6 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Status strip */}
         {(error || showLinked || showLinking || showFailed) && (
           <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-xs">
             {(showLinked || showLinking || showFailed) && (
@@ -577,7 +439,7 @@ export default function AccountClient() {
           </div>
         )}
 
-        {/* Balance (USD) */}
+        {/* Balance */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -586,11 +448,13 @@ export default function AccountClient() {
                 {balLoading ? "Loading…" : formatUSD(usdAmount)}
               </div>
               <div className="mt-1 text-xs text-[var(--re-muted)]">
-                {balLoading ? "Fetching latest rate" : `${formatCrypto(nativeAmount, nativeSymbol)} • ${priceUsd ? `$${priceUsd.toFixed(2)} / ${nativeSymbol}` : "—"}`}
+                {balLoading
+                  ? "Fetching latest rate"
+                  : `${formatEth(ethAmount)} • ${
+                      ethPriceUsd ? `$${ethPriceUsd.toFixed(2)} / ETH` : "—"
+                    }`}
               </div>
-              {balError ? (
-                <div className="mt-2 text-xs text-red-700">{balError}</div>
-              ) : null}
+              {balError ? <div className="mt-2 text-xs text-red-700">{balError}</div> : null}
             </div>
 
             <button
@@ -600,10 +464,7 @@ export default function AccountClient() {
               style={{ background: brandGradient }}
               title="Refresh balance"
             >
-              <span className="inline-flex items-center gap-2">
-                <RefreshCw className={`h-4 w-4 ${balLoading ? "animate-spin" : ""}`} />
-                Refresh
-              </span>
+              Refresh
             </button>
           </div>
         </div>

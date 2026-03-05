@@ -11,7 +11,6 @@ function looksLikeEvmAddress(addr: unknown): addr is string {
 async function tryFromUserInfo(magic: any): Promise<string> {
   try {
     const info = await magic?.user?.getInfo?.();
-    // Magic docs show: metadata.wallets.ethereum.publicAddress (and variants exist across SDK versions)
     const a =
       info?.wallets?.ethereum?.publicAddress ??
       info?.wallets?.eth?.publicAddress ??
@@ -48,18 +47,10 @@ async function tryFromRpc(magic: any): Promise<string> {
 
 async function forceProvisioning(magic: any) {
   try {
-    // This can trigger Magic wallet provisioning in some environments
     await magic?.rpcProvider?.request?.({ method: "eth_requestAccounts" });
   } catch {}
 }
 
-/**
- * Robust address getter for embedded wallets:
- * 1) user.getInfo() wallet metadata
- * 2) ethers provider listAccounts()
- * 3) rpc eth_accounts
- * Retries + optional provisioning trigger.
- */
 export async function getEvmAddressSafe(
   magic: any,
   opts?: { tries?: number; delayMs?: number }
@@ -77,7 +68,6 @@ export async function getEvmAddressSafe(
     const a3 = await tryFromRpc(magic);
     if (a3) return a3;
 
-    // halfway through, nudge provisioning once
     if (i === Math.floor(tries / 2)) {
       await forceProvisioning(magic);
     }
@@ -86,4 +76,9 @@ export async function getEvmAddressSafe(
   }
 
   return "";
+}
+
+// Optional alias if any older files still import this name
+export async function waitForEvmAddress(magic: any) {
+  return getEvmAddressSafe(magic);
 }

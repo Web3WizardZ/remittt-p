@@ -14,10 +14,6 @@ import {
   ArrowDownLeft,
   Plus,
   UserRound,
-  Wallet,
-  QrCode,
-  Coins,
-  ExternalLink,
   RefreshCcw,
 } from "lucide-react";
 
@@ -134,6 +130,34 @@ export default function AccountClient() {
     }
   };
 
+  // Widget UI actions (section-specific like QR)
+  const openAddressQR = async () => {
+    if (!magic) return;
+    try {
+      await (magic as any).wallet?.showAddress?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open QR code");
+    }
+  };
+
+  const openSendUI = async () => {
+    if (!magic) return;
+    try {
+      await (magic as any).wallet?.showSendTokensUI?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open send UI");
+    }
+  };
+
+  const openOnRamp = async () => {
+    if (!magic) return;
+    try {
+      await (magic as any).wallet?.showOnRamp?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open buy crypto (on-ramp)");
+    }
+  };
+
   // Boot + session + address
   useEffect(() => {
     let cancelled = false;
@@ -177,8 +201,7 @@ export default function AccountClient() {
           const data = await res.json().catch(() => ({}));
           if (!cancelled) setIssuer(String(data?.issuer ?? ""));
         } catch (e: any) {
-          if (!cancelled)
-            setError(e?.message ?? "Failed to validate session");
+          if (!cancelled) setError(e?.message ?? "Failed to validate session");
         }
 
         setPhase("get-address");
@@ -189,7 +212,6 @@ export default function AccountClient() {
         if (addr) {
           setAddress(addr);
 
-          // Keep this “in-app” (RemittEase) and only store locally for UX
           try {
             if (issuer) {
               setLinkStatus("linking");
@@ -211,8 +233,7 @@ export default function AccountClient() {
 
         setPhase("done");
       } catch (e: any) {
-        if (!cancelled)
-          setError(e?.message ?? "Unknown error on account page");
+        if (!cancelled) setError(e?.message ?? "Unknown error on account page");
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -228,52 +249,6 @@ export default function AccountClient() {
     loadBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [magic, address]);
-
-  // Widget UI actions (open only when user taps; keeps UI “predominantly RemittEase”)
-  const openWalletUI = async () => {
-    if (!magic) return;
-    try {
-      await (magic as any).wallet?.showUI?.();
-    } catch (e: any) {
-      setError(e?.message ?? "Could not open wallet");
-    }
-  };
-
-  const openSendUI = async () => {
-    if (!magic) return;
-    try {
-      await (magic as any).wallet?.showSendTokensUI?.();
-    } catch (e: any) {
-      setError(e?.message ?? "Could not open send UI");
-    }
-  };
-
-  const openAddressQR = async () => {
-    if (!magic) return;
-    try {
-      await (magic as any).wallet?.showAddress?.();
-    } catch (e: any) {
-      setError(e?.message ?? "Could not open address QR");
-    }
-  };
-
-  const openBalancesUI = async () => {
-    if (!magic) return;
-    try {
-      await (magic as any).wallet?.showBalances?.();
-    } catch (e: any) {
-      setError(e?.message ?? "Could not open balances");
-    }
-  };
-
-  const openOnRamp = async () => {
-    if (!magic) return;
-    try {
-      await (magic as any).wallet?.showOnRamp?.();
-    } catch (e: any) {
-      setError(e?.message ?? "Could not open on-ramp");
-    }
-  };
 
   const showLinking = issuer && linkStatus === "linking";
   const showConnected = issuer && linkStatus === "linked";
@@ -452,7 +427,6 @@ export default function AccountClient() {
                 priority
               />
             </div>
-
             <div>
               <div className="text-lg font-semibold">Account</div>
               <div className="flex items-center gap-2 text-sm text-[var(--re-muted)]">
@@ -515,9 +489,7 @@ export default function AccountClient() {
                       ethPriceUsd ? `$${ethPriceUsd.toFixed(2)} / ETH` : "—"
                     }`}
               </div>
-              {balError ? (
-                <div className="mt-2 text-xs text-red-700">{balError}</div>
-              ) : null}
+              {balError ? <div className="mt-2 text-xs text-red-700">{balError}</div> : null}
             </div>
 
             <button
@@ -535,10 +507,11 @@ export default function AccountClient() {
           </div>
         </div>
 
-        {/* Core Actions */}
+        {/* Actions (Magic widget sections like QR) */}
         <div className="mt-4 grid grid-cols-3 gap-3">
+          {/* Send -> goes straight to Send section */}
           <button
-            onClick={() => router.push("/send")}
+            onClick={openSendUI}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90"
           >
             <ArrowUpRight className="mx-auto h-5 w-5" />
@@ -546,8 +519,9 @@ export default function AccountClient() {
             <div className="mt-1 text-xs text-[var(--re-muted)]">Transfer</div>
           </button>
 
+          {/* Receive -> goes straight to QR section */}
           <button
-            onClick={() => router.push("/receive")}
+            onClick={openAddressQR}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90"
           >
             <ArrowDownLeft className="mx-auto h-5 w-5" />
@@ -555,23 +529,23 @@ export default function AccountClient() {
             <div className="mt-1 text-xs text-[var(--re-muted)]">Get paid</div>
           </button>
 
+          {/* Deposit -> goes straight to On-ramp / Buy Crypto */}
           <button
-            onClick={() => router.push("/deposit")}
+            onClick={openOnRamp}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90"
           >
             <Plus className="mx-auto h-5 w-5" />
             <div className="mt-2 text-sm font-semibold">Deposit</div>
-            <div className="mt-1 text-xs text-[var(--re-muted)]">Add funds</div>
+            <div className="mt-1 text-xs text-[var(--re-muted)]">Buy crypto</div>
           </button>
         </div>
 
-        {/* Wallet (RemittEase UI first, Magic widget on demand) */}
+        {/* Wallet */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs text-[var(--re-muted)]">Wallet</div>
-              <div className="mt-1 text-sm font-semibold">{shortAddr(address)}</div>
-            </div>
+          <div className="text-xs text-[var(--re-muted)]">Wallet address</div>
+
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold">{shortAddr(address)}</div>
 
             <button
               onClick={handleCopy}
@@ -582,67 +556,7 @@ export default function AccountClient() {
           </div>
 
           <div className="mt-3 text-xs text-[var(--re-muted)]">
-            Your embedded wallet is created automatically when you sign in.
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <button
-              onClick={openWalletUI}
-              className="rounded-2xl px-3 py-3 text-left text-sm font-semibold text-white"
-              style={{ background: brandGradient }}
-            >
-              <span className="inline-flex items-center gap-2">
-                <Wallet className="h-4 w-4" />
-                Open Wallet
-              </span>
-              <div className="mt-1 text-xs opacity-90">Full wallet experience</div>
-            </button>
-
-            <button
-              onClick={openOnRamp}
-              className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
-            >
-              <span className="inline-flex items-center gap-2 text-sm font-semibold">
-                <Coins className="h-4 w-4" />
-                Buy Crypto
-              </span>
-              <div className="mt-1 text-xs text-[var(--re-muted)]">Top up in-wallet</div>
-            </button>
-
-            <button
-              onClick={openSendUI}
-              className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
-            >
-              <span className="inline-flex items-center gap-2 text-sm font-semibold">
-                <ExternalLink className="h-4 w-4" />
-                Send in Wallet
-              </span>
-              <div className="mt-1 text-xs text-[var(--re-muted)]">Magic send UI</div>
-            </button>
-
-            <button
-              onClick={openBalancesUI}
-              className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
-            >
-              <span className="inline-flex items-center gap-2 text-sm font-semibold">
-                <Coins className="h-4 w-4" />
-                Balances
-              </span>
-              <div className="mt-1 text-xs text-[var(--re-muted)]">Token balances</div>
-            </button>
-
-            <button
-              onClick={openAddressQR}
-              className="col-span-2 rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
-            >
-              <span className="inline-flex items-center gap-2 text-sm font-semibold">
-                <QrCode className="h-4 w-4" />
-                Show QR Code
-              </span>
-              <div className="mt-1 text-xs text-[var(--re-muted)]">
-                Let someone scan to pay you
-              </div>
-            </button>
+            This is your embedded wallet address created at signup/login.
           </div>
         </div>
 

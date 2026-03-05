@@ -7,29 +7,22 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
-import { waitForEvmAddress } from "@/lib/magicSession";
+import { getEvmAddressSafe } from "@/lib/magicSession";
 import { ethers } from "ethers";
-import { ArrowUpRight, ArrowDownLeft, Plus, UserRound } from "lucide-react";
+import {
+  ArrowUpRight,
+  ArrowDownLeft,
+  Plus,
+  UserRound,
+  Wallet,
+  QrCode,
+  Coins,
+  ExternalLink,
+  RefreshCcw,
+} from "lucide-react";
 
 function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function forceEvmProvisioning(magic: any) {
-  try {
-    await magic?.rpcProvider?.request?.({ method: "eth_requestAccounts" });
-  } catch {}
-}
-
-async function waitAddrWithRetries(magic: any, tries = 16, delayMs = 250) {
-  for (let i = 0; i < tries; i++) {
-    const addr = await waitForEvmAddress(magic);
-    if (addr && typeof addr === "string" && addr.startsWith("0x")) return addr;
-    await sleep(delayMs);
-  }
-  return "";
 }
 
 function formatUSD(n: number) {
@@ -48,6 +41,14 @@ function formatEth(n: number) {
   }).format(n)} ETH`;
 }
 
+type Phase =
+  | "init"
+  | "check-login"
+  | "get-info"
+  | "validate"
+  | "get-address"
+  | "done";
+
 export default function AccountClient() {
   const router = useRouter();
 
@@ -62,18 +63,16 @@ export default function AccountClient() {
   }, []);
 
   const [ready, setReady] = useState(false);
-  const [phase, setPhase] = useState<
-    "init" | "check-login" | "get-info" | "validate" | "get-address" | "done"
-  >("init");
+  const [phase, setPhase] = useState<Phase>("init");
 
   const [address, setAddress] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [issuer, setIssuer] = useState<string>("");
 
   const [copied, setCopied] = useState(false);
-  const [linkStatus, setLinkStatus] = useState<"idle" | "linking" | "linked" | "failed">(
-    "idle"
-  );
+  const [linkStatus, setLinkStatus] = useState<
+    "idle" | "linking" | "linked" | "failed"
+  >("idle");
 
   const [error, setError] = useState<string>("");
 
@@ -84,98 +83,22 @@ export default function AccountClient() {
   const [usdAmount, setUsdAmount] = useState(0);
   const [ethPriceUsd, setEthPriceUsd] = useState(0);
 
-  const brandGradient = "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
+  const brandGradient =
+    "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
 
-  useEffect(() => {
-    let cancelled = false;
+  const handleLogout = async () => {
+    if (!magic) return;
+    await magic.user.logout();
+    router.replace("/auth");
+  };
 
-    (async () => {
-      try {
-        if (!magic) {
-          setError(magicInitError || "Magic is not initialized");
-          return;
-        }
-
-        setPhase("check-login");
-        const loggedIn = await magic.user.isLoggedIn();
-
-        if (!loggedIn) {
-          if (!cancelled) router.replace("/auth");
-          return;
-        }
-
-        setPhase("get-info");
-        try {
-          const info = await magic.user.getInfo();
-          const em = (info as any)?.email as string | undefined;
-          if (!cancelled) setEmail(em ?? "");
-        } catch {}
-
-        const idToken = await magic.user.getIdToken();
-
-        setPhase("validate");
-        try {
-          const res = await fetch("/api/auth/magic", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ idToken }),
-          });
-
-          if (!res.ok) {
-            const txt = await res.text().catch(() => "");
-            throw new Error(`Auth failed: ${res.status} ${txt}`);
-          }
-
-          const data = await res.json();
-          if (!cancelled) setIssuer(data?.issuer ?? "");
-        } catch (e: any) {
-          if (!cancelled) setError(e?.message ?? "Failed to validate session");
-        }
-
-        setPhase("get-address");
-        let addr = await waitAddrWithRetries(magic as any, 16, 250);
-
-        if (!addr) {
-          await forceEvmProvisioning(magic as any);
-          addr = await waitAddrWithRetries(magic as any, 20, 300);
-        }
-
-        if (cancelled) return;
-
-        if (addr) {
-          setAddress(addr);
-
-          if (issuer) {
-            try {
-              setLinkStatus("linking");
-              localStorage.setItem(`re_wallet_${issuer}`, addr);
-              setLinkStatus("linked");
-            } catch {
-              setLinkStatus("failed");
-            }
-          }
-
-          fetch("/api/account/wallet", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ idToken, address: addr }),
-          }).catch(() => {});
-        } else {
-          setAddress("");
-        }
-
-        setPhase("done");
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Unknown error on account page");
-      } finally {
-        if (!cancelled) setReady(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [magic, magicInitError, router, issuer]);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {}
+  };
 
   const loadBalance = async () => {
     if (!magic) return;
@@ -211,27 +134,147 @@ export default function AccountClient() {
     }
   };
 
+  // Boot + session + address
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        if (!magic) {
+          setError(magicInitError || "Magic is not initialized");
+          return;
+        }
+
+        setPhase("check-login");
+        const loggedIn = await magic.user.isLoggedIn();
+        if (!loggedIn) {
+          if (!cancelled) router.replace("/auth");
+          return;
+        }
+
+        setPhase("get-info");
+        try {
+          const info = await magic.user.getInfo();
+          const em = (info as any)?.email as string | undefined;
+          if (!cancelled) setEmail(em ?? "");
+        } catch {}
+
+        const idToken = await magic.user.getIdToken();
+
+        setPhase("validate");
+        try {
+          const res = await fetch("/api/auth/magic", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken }),
+          });
+
+          if (!res.ok) {
+            const txt = await res.text().catch(() => "");
+            throw new Error(`Auth failed: ${res.status} ${txt}`);
+          }
+
+          const data = await res.json().catch(() => ({}));
+          if (!cancelled) setIssuer(String(data?.issuer ?? ""));
+        } catch (e: any) {
+          if (!cancelled)
+            setError(e?.message ?? "Failed to validate session");
+        }
+
+        setPhase("get-address");
+        const addr = await getEvmAddressSafe(magic);
+
+        if (cancelled) return;
+
+        if (addr) {
+          setAddress(addr);
+
+          // Keep this “in-app” (RemittEase) and only store locally for UX
+          try {
+            if (issuer) {
+              setLinkStatus("linking");
+              localStorage.setItem(`re_wallet_${issuer}`, addr);
+              setLinkStatus("linked");
+            }
+          } catch {
+            setLinkStatus("failed");
+          }
+
+          fetch("/api/account/wallet", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken, address: addr }),
+          }).catch(() => {});
+        } else {
+          setAddress("");
+        }
+
+        setPhase("done");
+      } catch (e: any) {
+        if (!cancelled)
+          setError(e?.message ?? "Unknown error on account page");
+      } finally {
+        if (!cancelled) setReady(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [magic, magicInitError, router, issuer]);
+
   useEffect(() => {
     if (!magic || !address) return;
     loadBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [magic, address]);
 
-  const handleLogout = async () => {
+  // Widget UI actions (open only when user taps; keeps UI “predominantly RemittEase”)
+  const openWalletUI = async () => {
     if (!magic) return;
-    await magic.user.logout();
-    router.replace("/auth");
-  };
-
-  const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {}
+      await (magic as any).wallet?.showUI?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open wallet");
+    }
   };
 
-  // Friendly status (no issuer shown)
+  const openSendUI = async () => {
+    if (!magic) return;
+    try {
+      await (magic as any).wallet?.showSendTokensUI?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open send UI");
+    }
+  };
+
+  const openAddressQR = async () => {
+    if (!magic) return;
+    try {
+      await (magic as any).wallet?.showAddress?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open address QR");
+    }
+  };
+
+  const openBalancesUI = async () => {
+    if (!magic) return;
+    try {
+      await (magic as any).wallet?.showBalances?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open balances");
+    }
+  };
+
+  const openOnRamp = async () => {
+    if (!magic) return;
+    try {
+      await (magic as any).wallet?.showOnRamp?.();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not open on-ramp");
+    }
+  };
+
   const showLinking = issuer && linkStatus === "linking";
   const showConnected = issuer && linkStatus === "linked";
   const showConnFailed = issuer && linkStatus === "failed";
@@ -276,13 +319,17 @@ export default function AccountClient() {
                 />
               </div>
               <div>
-                <div className="text-lg font-semibold leading-tight">RemittEase</div>
+                <div className="text-lg font-semibold leading-tight">
+                  RemittEase
+                </div>
                 <div className="text-xs re-subtle">Getting things ready</div>
               </div>
             </div>
 
             <div className="mt-7">
-              <div className="text-2xl font-semibold leading-tight tracking-tight">{title}</div>
+              <div className="text-2xl font-semibold leading-tight tracking-tight">
+                {title}
+              </div>
               <div className="mt-2 text-sm re-subtle">{subtitle}</div>
             </div>
 
@@ -296,14 +343,17 @@ export default function AccountClient() {
                   }}
                 />
               </div>
-              <div className="mt-3 text-center text-xs re-subtle">Please don’t close this page.</div>
+              <div className="mt-3 text-center text-xs re-subtle">
+                Please don’t close this page.
+              </div>
             </div>
 
             {(magicInitError || error) && (
               <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                 <div className="font-semibold">We hit a snag</div>
                 <div className="mt-1">
-                  Please refresh the page. If it keeps happening, sign out and try again.
+                  Please refresh the page. If it keeps happening, sign out and
+                  try again.
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-3">
@@ -357,7 +407,9 @@ export default function AccountClient() {
         <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
           <div className="re-card rounded-3xl p-7">
             <div className="text-2xl font-semibold">Finalizing your wallet…</div>
-            <div className="mt-2 text-sm re-subtle">This can take a few seconds the first time.</div>
+            <div className="mt-2 text-sm re-subtle">
+              This can take a few seconds the first time.
+            </div>
 
             <div className="mt-6 grid grid-cols-2 gap-3">
               <button
@@ -400,6 +452,7 @@ export default function AccountClient() {
                 priority
               />
             </div>
+
             <div>
               <div className="text-lg font-semibold">Account</div>
               <div className="flex items-center gap-2 text-sm text-[var(--re-muted)]">
@@ -417,7 +470,6 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Smaller connection strip */}
         {(error || showLinking || showConnected || showConnFailed) && (
           <div className="mt-3 flex items-center justify-between rounded-2xl border border-[var(--re-border)] bg-white/50 px-3 py-2 text-[11px]">
             <div className="text-[var(--re-muted)]">
@@ -463,7 +515,9 @@ export default function AccountClient() {
                       ethPriceUsd ? `$${ethPriceUsd.toFixed(2)} / ETH` : "—"
                     }`}
               </div>
-              {balError ? <div className="mt-2 text-xs text-red-700">{balError}</div> : null}
+              {balError ? (
+                <div className="mt-2 text-xs text-red-700">{balError}</div>
+              ) : null}
             </div>
 
             <button
@@ -473,12 +527,15 @@ export default function AccountClient() {
               style={{ background: brandGradient }}
               title="Refresh balance"
             >
-              Refresh
+              <span className="inline-flex items-center gap-2">
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </span>
             </button>
           </div>
         </div>
 
-        {/* Actions */}
+        {/* Core Actions */}
         <div className="mt-4 grid grid-cols-3 gap-3">
           <button
             onClick={() => router.push("/send")}
@@ -508,12 +565,13 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Wallet */}
+        {/* Wallet (RemittEase UI first, Magic widget on demand) */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
-          <div className="text-xs text-[var(--re-muted)]">Wallet address</div>
-
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold">{shortAddr(address)}</div>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs text-[var(--re-muted)]">Wallet</div>
+              <div className="mt-1 text-sm font-semibold">{shortAddr(address)}</div>
+            </div>
 
             <button
               onClick={handleCopy}
@@ -524,7 +582,67 @@ export default function AccountClient() {
           </div>
 
           <div className="mt-3 text-xs text-[var(--re-muted)]">
-            This is your embedded wallet address created at signup/login.
+            Your embedded wallet is created automatically when you sign in.
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button
+              onClick={openWalletUI}
+              className="rounded-2xl px-3 py-3 text-left text-sm font-semibold text-white"
+              style={{ background: brandGradient }}
+            >
+              <span className="inline-flex items-center gap-2">
+                <Wallet className="h-4 w-4" />
+                Open Wallet
+              </span>
+              <div className="mt-1 text-xs opacity-90">Full wallet experience</div>
+            </button>
+
+            <button
+              onClick={openOnRamp}
+              className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
+            >
+              <span className="inline-flex items-center gap-2 text-sm font-semibold">
+                <Coins className="h-4 w-4" />
+                Buy Crypto
+              </span>
+              <div className="mt-1 text-xs text-[var(--re-muted)]">Top up in-wallet</div>
+            </button>
+
+            <button
+              onClick={openSendUI}
+              className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
+            >
+              <span className="inline-flex items-center gap-2 text-sm font-semibold">
+                <ExternalLink className="h-4 w-4" />
+                Send in Wallet
+              </span>
+              <div className="mt-1 text-xs text-[var(--re-muted)]">Magic send UI</div>
+            </button>
+
+            <button
+              onClick={openBalancesUI}
+              className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
+            >
+              <span className="inline-flex items-center gap-2 text-sm font-semibold">
+                <Coins className="h-4 w-4" />
+                Balances
+              </span>
+              <div className="mt-1 text-xs text-[var(--re-muted)]">Token balances</div>
+            </button>
+
+            <button
+              onClick={openAddressQR}
+              className="col-span-2 rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-3 text-left hover:bg-white/90"
+            >
+              <span className="inline-flex items-center gap-2 text-sm font-semibold">
+                <QrCode className="h-4 w-4" />
+                Show QR Code
+              </span>
+              <div className="mt-1 text-xs text-[var(--re-muted)]">
+                Let someone scan to pay you
+              </div>
+            </button>
           </div>
         </div>
 

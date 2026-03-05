@@ -1,92 +1,88 @@
-import type { Magic } from "magic-sdk";
-
-type WaitOpts = {
-  timeoutMs?: number;
-  intervalMs?: number;
-};
+// src/lib/magicSession.ts
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { ethers } from "ethers";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  let t: any;
-  return Promise.race([
-    p.finally(() => clearTimeout(t)),
-    new Promise<T>((resolve) => (t = setTimeout(() => resolve(fallback), ms))),
-  ]);
+function looksLikeEvmAddress(addr: unknown): addr is string {
+  return typeof addr === "string" && addr.startsWith("0x") && addr.length >= 42;
+}
+
+async function tryFromUserInfo(magic: any): Promise<string> {
+  try {
+    const info = await magic?.user?.getInfo?.();
+    // Magic docs show: metadata.wallets.ethereum.publicAddress (and variants exist across SDK versions)
+    const a =
+      info?.wallets?.ethereum?.publicAddress ??
+      info?.wallets?.eth?.publicAddress ??
+      info?.wallets?.[0]?.publicAddress ??
+      info?.publicAddress ??
+      info?.public_address;
+
+    return looksLikeEvmAddress(a) ? a : "";
+  } catch {
+    return "";
+  }
+}
+
+async function tryFromEthers(magic: any): Promise<string> {
+  try {
+    const provider = new ethers.BrowserProvider(magic.rpcProvider);
+    const accounts = await provider.listAccounts();
+    const a = accounts?.[0]?.address;
+    return looksLikeEvmAddress(a) ? a : "";
+  } catch {
+    return "";
+  }
+}
+
+async function tryFromRpc(magic: any): Promise<string> {
+  try {
+    const res = await magic?.rpcProvider?.request?.({ method: "eth_accounts" });
+    const a = Array.isArray(res) ? res[0] : "";
+    return looksLikeEvmAddress(a) ? a : "";
+  } catch {
+    return "";
+  }
+}
+
+async function forceProvisioning(magic: any) {
+  try {
+    // This can trigger Magic wallet provisioning in some environments
+    await magic?.rpcProvider?.request?.({ method: "eth_requestAccounts" });
+  } catch {}
 }
 
 /**
- * Reliable EVM address fetch:
- * 1) rpcProvider.eth_accounts
- * 2) user.getInfo().publicAddress (guarded with timeout)
- * 3) rpcProvider.eth_requestAccounts
- * 4) repeat until timeout
+ * Robust address getter for embedded wallets:
+ * 1) user.getInfo() wallet metadata
+ * 2) ethers provider listAccounts()
+ * 3) rpc eth_accounts
+ * Retries + optional provisioning trigger.
  */
-export async function waitForEvmAddress(
-  magic: Magic,
-  opts: WaitOpts = {}
+export async function getEvmAddressSafe(
+  magic: any,
+  opts?: { tries?: number; delayMs?: number }
 ): Promise<string> {
-  const timeoutMs = opts.timeoutMs ?? 20_000;
-  const intervalMs = opts.intervalMs ?? 400;
+  const tries = opts?.tries ?? 18;
+  const delayMs = opts?.delayMs ?? 250;
 
-  const started = Date.now();
-
-  const getFromRpc = async (): Promise<string> => {
-    const provider = (magic as any)?.rpcProvider;
-    if (!provider?.request) return "";
-
-    // Try eth_accounts first (no UI / no permission prompt)
-    const accts = await withTimeout<string[]>(
-      provider.request({ method: "eth_accounts" }),
-      1500,
-      []
-    );
-
-    const a0 = accts?.[0];
-    return typeof a0 === "string" && a0.startsWith("0x") ? a0 : "";
-  };
-
-  const getFromInfo = async (): Promise<string> => {
-    // Guard getInfo because it sometimes hangs
-    const info = await withTimeout<any>(
-      (magic as any).user.getInfo(),
-      2000,
-      null
-    );
-    const addr = info?.publicAddress as string | undefined;
-    return typeof addr === "string" && addr.startsWith("0x") ? addr : "";
-  };
-
-  // Small initial delay helps avoid “stuck on getInfo” right after redirect/login
-  await sleep(250);
-
-  while (Date.now() - started < timeoutMs) {
-    // 1) provider accounts
-    const a1 = await getFromRpc();
+  for (let i = 0; i < tries; i++) {
+    const a1 = await tryFromUserInfo(magic);
     if (a1) return a1;
 
-    // 2) user.getInfo
-    const a2 = await getFromInfo();
+    const a2 = await tryFromEthers(magic);
     if (a2) return a2;
 
-    // 3) force provisioning (may show wallet permission internally)
-    try {
-      const provider = (magic as any)?.rpcProvider;
-      const req = provider?.request;
-      if (req) {
-        const accts = await withTimeout<string[]>(
-          req({ method: "eth_requestAccounts" }),
-          2500,
-          []
-        );
-        const a0 = accts?.[0];
-        if (typeof a0 === "string" && a0.startsWith("0x")) return a0;
-      }
-    } catch {
-      // ignore and keep polling
+    const a3 = await tryFromRpc(magic);
+    if (a3) return a3;
+
+    // halfway through, nudge provisioning once
+    if (i === Math.floor(tries / 2)) {
+      await forceProvisioning(magic);
     }
 
-    await sleep(intervalMs);
+    await sleep(delayMs);
   }
 
   return "";

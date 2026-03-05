@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
-import { waitForEvmAddress } from "@/lib/magicSession";
+import { getEvmAddressSafe } from "@/lib/magicSession";
 
 const brandGradient = "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
 
@@ -42,7 +42,7 @@ export default function AuthClient() {
       await (magic as any).wallet.connectWithUI();
 
       // 2) Wait for embedded wallet address
-      const addr = await waitForEvmAddress(magic as any);
+      const addr = await getEvmAddressSafe(magic);
       if (!addr) throw new Error("Wallet address not ready yet. Please retry.");
 
       // 3) Get ID token

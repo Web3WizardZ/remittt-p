@@ -133,6 +133,7 @@ export default function AccountClient() {
   // Widget UI actions (section-specific like QR)
   const openAddressQR = async () => {
     if (!magic) return;
+    setError("");
     try {
       await (magic as any).wallet?.showAddress?.();
     } catch (e: any) {
@@ -142,19 +143,24 @@ export default function AccountClient() {
 
   const openSendUI = async () => {
     if (!magic) return;
+    setError("");
     try {
       await (magic as any).wallet?.showSendTokensUI?.();
     } catch (e: any) {
-      setError(e?.message ?? "Could not open send UI");
+      setError(e?.message ?? "Could not open Send");
     }
   };
 
   const openOnRamp = async () => {
     if (!magic) return;
+    setError("");
     try {
       await (magic as any).wallet?.showOnRamp?.();
     } catch (e: any) {
-      setError(e?.message ?? "Could not open buy crypto (on-ramp)");
+      setError(
+        e?.message ??
+          "Could not open Buy Crypto. Ensure Widget UI + On-ramp is enabled in Magic dashboard."
+      );
     }
   };
 
@@ -408,7 +414,9 @@ export default function AccountClient() {
     );
   }
 
-  const headerSub = email ? `Signed in as ${email}` : `Wallet ${shortAddr(address)}`;
+  const headerSub = email
+    ? `Signed in as ${email}`
+    : `Wallet ${shortAddr(address)}`;
 
   return (
     <main className="relative min-h-screen">
@@ -444,41 +452,46 @@ export default function AccountClient() {
           </button>
         </div>
 
+        {/* Sync strip (non-blocking so it never steals taps on iOS) */}
         {(error || showLinking || showConnected || showConnFailed) && (
-          <div className="mt-3 flex items-center justify-between rounded-2xl border border-[var(--re-border)] bg-white/50 px-3 py-2 text-[11px]">
-            <div className="text-[var(--re-muted)]">
-              {error
-                ? "Sync issue — some features may be limited."
-                : showConnFailed
-                ? "Connection issue — refresh."
-                : showLinking
-                ? "Connecting…"
-                : "Connected"}
-            </div>
+          <div className="relative z-20 mt-3">
+            <div className="pointer-events-none flex items-center justify-between rounded-2xl border border-[var(--re-border)] bg-white/50 px-3 py-2 text-[11px]">
+              <div className="text-[var(--re-muted)]">
+                {error
+                  ? "Sync issue — some features may be limited."
+                  : showConnFailed
+                  ? "Connection issue — refresh."
+                  : showLinking
+                  ? "Connecting…"
+                  : "Connected"}
+              </div>
 
-            {!error && !showConnFailed ? (
-              <span
-                className="rounded-full px-2 py-0.5 font-semibold text-white"
-                style={{ background: brandGradient }}
-              >
-                Connected
-              </span>
-            ) : (
-              <button
-                onClick={() => window.location.reload()}
-                className="rounded-full border border-[var(--re-border)] bg-white/70 px-2 py-0.5 font-semibold hover:bg-white/90"
-              >
-                Refresh
-              </button>
-            )}
+              {error || showConnFailed ? (
+                <button
+                  onClick={() => window.location.reload()}
+                  className="pointer-events-auto rounded-full border border-[var(--re-border)] bg-white/70 px-2 py-0.5 font-semibold hover:bg-white/90"
+                >
+                  Refresh
+                </button>
+              ) : (
+                <span
+                  className="pointer-events-none rounded-full px-2 py-0.5 font-semibold text-white"
+                  style={{ background: brandGradient }}
+                >
+                  Connected
+                </span>
+              )}
+            </div>
           </div>
         )}
 
         {/* Balance */}
-        <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
+        <div className="relative z-10 mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs text-[var(--re-muted)]">Account balance</div>
+              <div className="text-xs text-[var(--re-muted)]">
+                Account balance
+              </div>
               <div className="mt-2 text-3xl font-semibold tracking-tight">
                 {balLoading ? "Loading…" : formatUSD(usdAmount)}
               </div>
@@ -489,7 +502,9 @@ export default function AccountClient() {
                       ethPriceUsd ? `$${ethPriceUsd.toFixed(2)} / ETH` : "—"
                     }`}
               </div>
-              {balError ? <div className="mt-2 text-xs text-red-700">{balError}</div> : null}
+              {balError ? (
+                <div className="mt-2 text-xs text-red-700">{balError}</div>
+              ) : null}
             </div>
 
             <button
@@ -507,9 +522,8 @@ export default function AccountClient() {
           </div>
         </div>
 
-        {/* Actions (Magic widget sections like QR) */}
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          {/* Send -> goes straight to Send section */}
+        {/* Actions (widget sections) */}
+        <div className="relative z-10 mt-4 grid grid-cols-3 gap-3">
           <button
             onClick={openSendUI}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90"
@@ -519,7 +533,6 @@ export default function AccountClient() {
             <div className="mt-1 text-xs text-[var(--re-muted)]">Transfer</div>
           </button>
 
-          {/* Receive -> goes straight to QR section */}
           <button
             onClick={openAddressQR}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90"
@@ -529,7 +542,6 @@ export default function AccountClient() {
             <div className="mt-1 text-xs text-[var(--re-muted)]">Get paid</div>
           </button>
 
-          {/* Deposit -> goes straight to On-ramp / Buy Crypto */}
           <button
             onClick={openOnRamp}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90"
@@ -541,7 +553,7 @@ export default function AccountClient() {
         </div>
 
         {/* Wallet */}
-        <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
+        <div className="relative z-10 mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="text-xs text-[var(--re-muted)]">Wallet address</div>
 
           <div className="mt-2 flex items-center justify-between gap-3">
@@ -560,7 +572,7 @@ export default function AccountClient() {
           </div>
         </div>
 
-        <div className="mt-6 text-center text-xs text-[var(--re-muted)]">
+        <div className="relative z-10 mt-6 text-center text-xs text-[var(--re-muted)]">
           <Link href="/" className="font-semibold text-[var(--re-primary)]">
             Back to Home
           </Link>

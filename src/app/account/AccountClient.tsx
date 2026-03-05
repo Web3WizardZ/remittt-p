@@ -145,7 +145,6 @@ export default function AccountClient() {
         if (addr) {
           setAddress(addr);
 
-          // local reflect (optional)
           if (issuer) {
             try {
               setLinkStatus("linking");
@@ -156,7 +155,6 @@ export default function AccountClient() {
             }
           }
 
-          // best-effort save to backend
           fetch("/api/account/wallet", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -419,35 +417,34 @@ export default function AccountClient() {
           </button>
         </div>
 
+        {/* Smaller connection strip */}
         {(error || showLinking || showConnected || showConnFailed) && (
-          <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-xs">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[var(--re-muted)]">
-                {error
-                  ? "We couldn’t sync your account. Some features may be limited."
-                  : showConnFailed
-                  ? "Connection issue. Please refresh."
-                  : showLinking
-                  ? "Connecting your account…"
-                  : "Connected"}
-              </div>
-
-              {!error && !showConnFailed ? (
-                <span
-                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
-                  style={{ background: brandGradient }}
-                >
-                  Connected
-                </span>
-              ) : (
-                <button
-                  onClick={() => window.location.reload()}
-                  className="rounded-full border border-[var(--re-border)] bg-white/70 px-3 py-1.5 text-[11px] font-semibold hover:bg-white/90"
-                >
-                  Refresh
-                </button>
-              )}
+          <div className="mt-3 flex items-center justify-between rounded-2xl border border-[var(--re-border)] bg-white/50 px-3 py-2 text-[11px]">
+            <div className="text-[var(--re-muted)]">
+              {error
+                ? "Sync issue — some features may be limited."
+                : showConnFailed
+                ? "Connection issue — refresh."
+                : showLinking
+                ? "Connecting…"
+                : "Connected"}
             </div>
+
+            {!error && !showConnFailed ? (
+              <span
+                className="rounded-full px-2 py-0.5 font-semibold text-white"
+                style={{ background: brandGradient }}
+              >
+                Connected
+              </span>
+            ) : (
+              <button
+                onClick={() => window.location.reload()}
+                className="rounded-full border border-[var(--re-border)] bg-white/70 px-2 py-0.5 font-semibold hover:bg-white/90"
+              >
+                Refresh
+              </button>
+            )}
           </div>
         )}
 

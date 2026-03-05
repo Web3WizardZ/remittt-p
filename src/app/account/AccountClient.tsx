@@ -145,6 +145,7 @@ export default function AccountClient() {
         if (addr) {
           setAddress(addr);
 
+          // local reflect (optional)
           if (issuer) {
             try {
               setLinkStatus("linking");
@@ -155,6 +156,7 @@ export default function AccountClient() {
             }
           }
 
+          // best-effort save to backend
           fetch("/api/account/wallet", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -230,6 +232,11 @@ export default function AccountClient() {
       setTimeout(() => setCopied(false), 1200);
     } catch {}
   };
+
+  // Friendly status (no issuer shown)
+  const showLinking = issuer && linkStatus === "linking";
+  const showConnected = issuer && linkStatus === "linked";
+  const showConnFailed = issuer && linkStatus === "failed";
 
   if (!ready) {
     const title =
@@ -376,16 +383,7 @@ export default function AccountClient() {
     );
   }
 
-  const headerSub = email
-    ? `Signed in as ${email}`
-    : issuer
-    ? `User ${issuer.slice(0, 10)}…`
-    : `Wallet ${shortAddr(address)}`;
-
-  const showLinked = issuer && linkStatus === "linked" ? "✅ Wallet linked to account" : "";
-  const showLinking = issuer && linkStatus === "linking" ? "Linking wallet to account…" : "";
-  const showFailed =
-    issuer && linkStatus === "failed" ? "⚠️ Could not save wallet locally (storage blocked)" : "";
+  const headerSub = email ? `Signed in as ${email}` : `Wallet ${shortAddr(address)}`;
 
   return (
     <main className="relative min-h-screen">
@@ -421,21 +419,35 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {(error || showLinked || showLinking || showFailed) && (
+        {(error || showLinking || showConnected || showConnFailed) && (
           <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-4 py-3 text-xs">
-            {(showLinked || showLinking || showFailed) && (
-              <div className="font-semibold">{showLinked || showLinking || showFailed}</div>
-            )}
-            {issuer && (
-              <div className="mt-1 text-[var(--re-muted)]">
-                Issuer: <span className="font-mono">{issuer}</span>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[var(--re-muted)]">
+                {error
+                  ? "We couldn’t sync your account. Some features may be limited."
+                  : showConnFailed
+                  ? "Connection issue. Please refresh."
+                  : showLinking
+                  ? "Connecting your account…"
+                  : "Connected"}
               </div>
-            )}
-            {error && (
-              <div className="mt-2 text-red-700">
-                Error: <span className="font-mono">{error}</span>
-              </div>
-            )}
+
+              {!error && !showConnFailed ? (
+                <span
+                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
+                  style={{ background: brandGradient }}
+                >
+                  Connected
+                </span>
+              ) : (
+                <button
+                  onClick={() => window.location.reload()}
+                  className="rounded-full border border-[var(--re-border)] bg-white/70 px-3 py-1.5 text-[11px] font-semibold hover:bg-white/90"
+                >
+                  Refresh
+                </button>
+              )}
+            </div>
           </div>
         )}
 

@@ -47,7 +47,7 @@ type Phase =
   | "done";
 
 type Network = {
-  id: "eth" | "base" | "bnb" | "celo" | "arb";
+  id: "eth" | "base" | "op" | "polygon" | "celo" | "arb";
   name: string;
   chainId: number;
   nativeSymbol: string;
@@ -56,7 +56,8 @@ type Network = {
 const NETWORKS: Network[] = [
   { id: "eth", name: "Ethereum", chainId: 1, nativeSymbol: "ETH" },
   { id: "base", name: "Base", chainId: 8453, nativeSymbol: "ETH" },
-  { id: "bnb", name: "Binance", chainId: 56, nativeSymbol: "BNB" },
+  { id: "op", name: "Optimism", chainId: 10, nativeSymbol: "ETH" },
+  { id: "polygon", name: "Polygon", chainId: 137, nativeSymbol: "MATIC" },
   { id: "celo", name: "Celo", chainId: 42220, nativeSymbol: "CELO" },
   { id: "arb", name: "Arbitrum", chainId: 42161, nativeSymbol: "ETH" },
 ];
@@ -202,8 +203,8 @@ export default function AccountClient() {
   const openOnRamp = async () => {
     if (!magic || openingWidget) return;
 
-    if (network.chainId !== 1) {
-      flashNotice("Buy Crypto is available on Ethereum.");
+    if (network.chainId !== 1 && network.chainId !== 137) {
+      flashNotice("Buy Crypto is available on Ethereum and Polygon.");
       return;
     }
 

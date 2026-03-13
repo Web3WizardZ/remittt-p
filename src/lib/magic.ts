@@ -12,8 +12,12 @@ const magicInstance =
               chainId: 8453,
             },
             {
-              rpcUrl: "https://bsc-dataseed-public.bnbchain.org",
-              chainId: 56,
+              rpcUrl: "https://mainnet.optimism.io",
+              chainId: 10,
+            },
+            {
+              rpcUrl: "https://polygon-rpc.com/",
+              chainId: 137,
             },
             {
               rpcUrl: "https://forno.celo.org",

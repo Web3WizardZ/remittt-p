@@ -3,10 +3,11 @@ import { NextResponse } from "next/server";
 
 const COINGECKO_IDS: Record<number, string> = {
   1: "ethereum",
+  10: "ethereum",
+  137: "matic-network",
   8453: "ethereum",
-  42161: "ethereum",
-  56: "binancecoin",
   42220: "celo",
+  42161: "ethereum",
 };
 
 export async function GET(req: Request) {

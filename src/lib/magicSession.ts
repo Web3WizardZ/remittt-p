@@ -106,6 +106,7 @@ export async function getSolanaAddressSafe(
   return "";
 }
 
+// Back-compat alias
 export async function waitForEvmAddress(magic: any) {
   return getEvmAddressSafe(magic);
 }

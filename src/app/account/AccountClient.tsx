@@ -47,7 +47,7 @@ type Phase =
   | "done";
 
 type Network = {
-  id: "eth" | "arb";
+  id: "eth" | "base" | "bnb" | "celo" | "arb";
   name: string;
   chainId: number;
   nativeSymbol: string;
@@ -55,6 +55,9 @@ type Network = {
 
 const NETWORKS: Network[] = [
   { id: "eth", name: "Ethereum", chainId: 1, nativeSymbol: "ETH" },
+  { id: "base", name: "Base", chainId: 8453, nativeSymbol: "ETH" },
+  { id: "bnb", name: "Binance", chainId: 56, nativeSymbol: "BNB" },
+  { id: "celo", name: "Celo", chainId: 42220, nativeSymbol: "CELO" },
   { id: "arb", name: "Arbitrum", chainId: 42161, nativeSymbol: "ETH" },
 ];
 

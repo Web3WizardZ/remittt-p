@@ -8,6 +8,18 @@ const magicInstance =
         extensions: [
           new EVMExtension([
             {
+              rpcUrl: "https://mainnet.base.org",
+              chainId: 8453,
+            },
+            {
+              rpcUrl: "https://bsc-dataseed.binance.org/",
+              chainId: 56,
+            },
+            {
+              rpcUrl: "https://forno.celo.org",
+              chainId: 42220,
+            },
+            {
               rpcUrl: "https://arb1.arbitrum.io/rpc",
               chainId: 42161,
             },

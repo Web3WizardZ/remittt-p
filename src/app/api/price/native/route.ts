@@ -3,19 +3,15 @@ import { NextResponse } from "next/server";
 
 const COINGECKO_IDS: Record<number, string> = {
   1: "ethereum",
-  10: "ethereum",
-  8453: "ethereum",
   42161: "ethereum",
-  137: "matic-network",
-  43114: "avalanche-2",
 };
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const chainId = Number(searchParams.get("chainId") || "1");
-    const id = COINGECKO_IDS[chainId];
 
+    const id = COINGECKO_IDS[chainId];
     if (!id) {
       return NextResponse.json({ error: "Unsupported chain" }, { status: 400 });
     }

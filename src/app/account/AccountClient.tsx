@@ -6,14 +6,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Connection, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { getMagic } from "@/lib/magic";
+import { getEvmAddressSafe, switchEvmChainSafe } from "@/lib/magicSession";
 import { ethers } from "ethers";
-import { getMagic, CHAIN_RPC } from "@/lib/magic";
-import {
-  getEvmAddressSafe,
-  getSolanaAddressSafe,
-  switchEvmChainSafe,
-} from "@/lib/magicSession";
 import {
   ArrowUpRight,
   ArrowDownLeft,
@@ -27,20 +22,20 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
 }
 
-function formatUSD(n: number) {
-  if (!Number.isFinite(n)) return "—";
+function formatUSD(n: number | null) {
+  if (!Number.isFinite(Number(n))) return "—";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: n >= 1000 ? 0 : 2,
-  }).format(n);
+    maximumFractionDigits: Number(n) >= 1000 ? 0 : 2,
+  }).format(Number(n));
 }
 
-function formatNative(n: number, symbol: string) {
-  if (!Number.isFinite(n)) return `— ${symbol}`;
+function formatNative(n: number | null, symbol: string) {
+  if (!Number.isFinite(Number(n))) return `— ${symbol}`;
   return `${new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: n >= 1 ? 4 : 6,
-  }).format(n)} ${symbol}`;
+    maximumFractionDigits: Number(n) >= 1 ? 4 : 6,
+  }).format(Number(n))} ${symbol}`;
 }
 
 type Phase =
@@ -51,65 +46,16 @@ type Phase =
   | "get-address"
   | "done";
 
-type NetworkType = "evm" | "solana";
-
 type Network = {
-  id: string;
-  type: NetworkType;
+  id: "eth" | "arb";
   name: string;
-  chainId?: number;
+  chainId: number;
   nativeSymbol: string;
-  rpcUrl?: string;
 };
 
 const NETWORKS: Network[] = [
-  {
-    id: "eth",
-    type: "evm",
-    name: "Ethereum",
-    chainId: 1,
-    nativeSymbol: "ETH",
-    rpcUrl: CHAIN_RPC.ETHEREUM,
-  },
-  {
-    id: "polygon",
-    type: "evm",
-    name: "Polygon",
-    chainId: 137,
-    nativeSymbol: "MATIC",
-    rpcUrl: CHAIN_RPC.POLYGON,
-  },
-  {
-    id: "optimism",
-    type: "evm",
-    name: "Optimism",
-    chainId: 10,
-    nativeSymbol: "ETH",
-    rpcUrl: CHAIN_RPC.OPTIMISM,
-  },
-  {
-    id: "base",
-    type: "evm",
-    name: "Base",
-    chainId: 8453,
-    nativeSymbol: "ETH",
-    rpcUrl: CHAIN_RPC.BASE,
-  },
-  {
-    id: "arbitrum",
-    type: "evm",
-    name: "Arbitrum",
-    chainId: 42161,
-    nativeSymbol: "ETH",
-    rpcUrl: CHAIN_RPC.ARBITRUM,
-  },
-  {
-    id: "solana",
-    type: "solana",
-    name: "Solana",
-    nativeSymbol: "SOL",
-    rpcUrl: CHAIN_RPC.SOLANA,
-  },
+  { id: "eth", name: "Ethereum", chainId: 1, nativeSymbol: "ETH" },
+  { id: "arb", name: "Arbitrum", chainId: 42161, nativeSymbol: "ETH" },
 ];
 
 export default function AccountClient() {
@@ -138,10 +84,7 @@ export default function AccountClient() {
   });
   const [switching, setSwitching] = useState(false);
 
-  const [evmAddress, setEvmAddress] = useState("");
-  const [solAddress, setSolAddress] = useState("");
-  const activeAddress = network.type === "solana" ? solAddress : evmAddress;
-
+  const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
   const [issuer, setIssuer] = useState("");
 
@@ -155,9 +98,9 @@ export default function AccountClient() {
 
   const [balLoading, setBalLoading] = useState(false);
   const [balError, setBalError] = useState("");
-  const [nativeAmount, setNativeAmount] = useState(0);
-  const [usdAmount, setUsdAmount] = useState(0);
-  const [nativePriceUsd, setNativePriceUsd] = useState(0);
+  const [nativeAmount, setNativeAmount] = useState<number | null>(null);
+  const [usdAmount, setUsdAmount] = useState<number | null>(null);
+  const [nativePriceUsd, setNativePriceUsd] = useState<number | null>(null);
 
   const [openingWidget, setOpeningWidget] = useState<
     null | "send" | "receive" | "deposit"
@@ -179,60 +122,47 @@ export default function AccountClient() {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(activeAddress);
+      await navigator.clipboard.writeText(address);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {}
   };
 
-  async function loadEvmBalanceReadOnly() {
-    if (!network.chainId || !network.rpcUrl || !evmAddress) return;
-
-    const provider = new ethers.JsonRpcProvider(network.rpcUrl, network.chainId);
-    const balWei = await provider.getBalance(evmAddress);
-    const native = Number(ethers.formatEther(balWei));
-
-    const priceRes = await fetch(`/api/price/native?chainId=${network.chainId}`, {
-      cache: "no-store",
-    });
-    const priceJson = await priceRes.json().catch(() => ({}));
-    if (!priceRes.ok) throw new Error(priceJson?.error ?? "Price unavailable");
-
-    const price = Number(priceJson?.usd ?? 0);
-    const usd = native * price;
-
-    setNativeAmount(native);
-    setNativePriceUsd(price);
-    setUsdAmount(usd);
-  }
-
-  async function loadSolanaBalanceReadOnly() {
-    if (!network.rpcUrl || !solAddress) return;
-
-    const connection = new Connection(network.rpcUrl, "confirmed");
-    const lamports = await connection.getBalance(new PublicKey(solAddress));
-    const native = lamports / LAMPORTS_PER_SOL;
-
-    setNativeAmount(native);
-    setNativePriceUsd(0);
-    setUsdAmount(0);
-  }
-
   const loadBalance = async () => {
+    if (!magic || !address) return;
+
     setBalLoading(true);
     setBalError("");
 
     try {
-      if (network.type === "evm") {
-        await loadEvmBalanceReadOnly();
-      } else {
-        await loadSolanaBalanceReadOnly();
-      }
+      await switchEvmChainSafe(magic, network.chainId);
+
+      const provider = new ethers.BrowserProvider((magic as any).rpcProvider);
+      await provider.send("eth_requestAccounts", []);
+      const signer = await provider.getSigner();
+      const signerAddress = await signer.getAddress();
+
+      const balWei = await provider.getBalance(signerAddress);
+      const native = Number(ethers.formatEther(balWei));
+
+      const priceRes = await fetch(
+        `/api/price/native?chainId=${network.chainId}`,
+        { cache: "no-store" }
+      );
+      const priceJson = await priceRes.json().catch(() => ({}));
+      if (!priceRes.ok) throw new Error(priceJson?.error ?? "Price unavailable");
+
+      const price = Number(priceJson?.usd ?? 0);
+      const usd = native * price;
+
+      setNativeAmount(native);
+      setNativePriceUsd(price);
+      setUsdAmount(usd);
     } catch (e: any) {
       setBalError(e?.message ?? "Could not load balance");
-      setNativeAmount(0);
-      setUsdAmount(0);
-      setNativePriceUsd(0);
+      setNativeAmount(null);
+      setUsdAmount(null);
+      setNativePriceUsd(null);
     } finally {
       setBalLoading(false);
     }
@@ -241,16 +171,9 @@ export default function AccountClient() {
   const openAddressQR = async () => {
     if (!magic || openingWidget) return;
 
-    if (network.type !== "evm") {
-      flashNotice("QR widget is available on EVM networks.");
-      return;
-    }
-
     setOpeningWidget("receive");
     try {
-      if (network.chainId) {
-        await switchEvmChainSafe(magic, network.chainId);
-      }
+      await switchEvmChainSafe(magic, network.chainId);
       await (magic as any).wallet?.showAddress?.();
     } catch (e: any) {
       flashNotice(e?.message ?? "Could not open QR");
@@ -262,16 +185,9 @@ export default function AccountClient() {
   const openSendUI = async () => {
     if (!magic || openingWidget) return;
 
-    if (network.type !== "evm") {
-      flashNotice("Send widget is available on EVM networks.");
-      return;
-    }
-
     setOpeningWidget("send");
     try {
-      if (network.chainId) {
-        await switchEvmChainSafe(magic, network.chainId);
-      }
+      await switchEvmChainSafe(magic, network.chainId);
       await (magic as any).wallet?.showSendTokensUI?.();
     } catch (e: any) {
       flashNotice(e?.message ?? "Could not open Send");
@@ -283,12 +199,8 @@ export default function AccountClient() {
   const openOnRamp = async () => {
     if (!magic || openingWidget) return;
 
-    if (network.type !== "evm" || !network.chainId) {
-      flashNotice("Buy Crypto is available on Ethereum / Polygon.");
-      return;
-    }
-    if (network.chainId !== 1 && network.chainId !== 137) {
-      flashNotice("Buy Crypto is available on Ethereum / Polygon.");
+    if (network.chainId !== 1) {
+      flashNotice("Buy Crypto is available on Ethereum.");
       return;
     }
 
@@ -360,11 +272,10 @@ export default function AccountClient() {
 
         setPhase("get-address");
 
-        const evmAddr = await getEvmAddressSafe(magic);
-        if (!cancelled) setEvmAddress(evmAddr);
+        await switchEvmChainSafe(magic, network.chainId);
 
-        const solAddr = await getSolanaAddressSafe(magic);
-        if (!cancelled) setSolAddress(solAddr);
+        const evmAddr = await getEvmAddressSafe(magic);
+        if (!cancelled) setAddress(evmAddr);
 
         if (cancelled) return;
 
@@ -402,7 +313,7 @@ export default function AccountClient() {
   }, [magic, magicInitError, router, issuer]);
 
   useEffect(() => {
-    if (!magic) return;
+    if (!magic || !address) return;
 
     (async () => {
       try {
@@ -414,10 +325,7 @@ export default function AccountClient() {
           window.localStorage.setItem("re_network", network.id);
         }
 
-        if (network.type === "evm" && network.chainId) {
-          await switchEvmChainSafe(magic, network.chainId);
-        }
-
+        await switchEvmChainSafe(magic, network.chainId);
         await loadBalance();
       } catch (e: any) {
         setSyncError(e?.message ?? "Network switch failed");
@@ -426,21 +334,35 @@ export default function AccountClient() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [network.id]);
-
-  useEffect(() => {
-    if (!ready) return;
-    if (network.type === "evm" && !evmAddress) return;
-    if (network.type === "solana" && !solAddress) return;
-    loadBalance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, evmAddress, solAddress]);
+  }, [network.id, address]);
 
   const showLinking = issuer && linkStatus === "linking";
   const showConnected = issuer && linkStatus === "linked";
   const showConnFailed = issuer && linkStatus === "failed";
 
   if (!ready) {
+    const title =
+      phase === "check-login"
+        ? "Checking your session…"
+        : phase === "get-info"
+        ? "Preparing your account…"
+        : phase === "validate"
+        ? "Securing your sign-in…"
+        : phase === "get-address"
+        ? "Setting up your wallet…"
+        : "Loading your account…";
+
+    const subtitle =
+      phase === "check-login"
+        ? "Just a moment while we verify you."
+        : phase === "get-info"
+        ? "Fetching your profile details."
+        : phase === "validate"
+        ? "Confirming your secure session."
+        : phase === "get-address"
+        ? "Preparing your embedded wallet."
+        : "Almost there.";
+
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
@@ -465,9 +387,9 @@ export default function AccountClient() {
 
             <div className="mt-7">
               <div className="text-2xl font-semibold leading-tight tracking-tight">
-                Loading your account…
+                {title}
               </div>
-              <div className="mt-2 text-sm re-subtle">Almost there.</div>
+              <div className="mt-2 text-sm re-subtle">{subtitle}</div>
             </div>
 
             {(magicInitError || syncError) && (
@@ -605,25 +527,17 @@ export default function AccountClient() {
               <div className="text-xs text-[var(--re-muted)]">Account balance</div>
 
               <div className="mt-2 text-3xl font-semibold tracking-tight">
-                {network.type === "evm"
-                  ? balLoading
-                    ? "Loading…"
-                    : formatUSD(usdAmount)
-                  : balLoading
-                  ? "Loading…"
-                  : "—"}
+                {balLoading ? "Loading…" : formatUSD(usdAmount)}
               </div>
 
               <div className="mt-1 text-xs text-[var(--re-muted)]">
                 {balLoading
                   ? "Fetching latest rate"
-                  : network.type === "evm"
-                  ? `${formatNative(nativeAmount, network.nativeSymbol)} • ${
-                      nativePriceUsd
+                  : `${formatNative(nativeAmount, network.nativeSymbol)} • ${
+                      nativePriceUsd !== null
                         ? `$${nativePriceUsd.toFixed(2)} / ${network.nativeSymbol}`
                         : "—"
-                    }`
-                  : `${formatNative(nativeAmount, network.nativeSymbol)} • USD price not added yet`}
+                    }`}
               </div>
 
               {balError ? (
@@ -683,12 +597,12 @@ export default function AccountClient() {
 
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold">
-              {activeAddress ? shortAddr(activeAddress) : "—"}
+              {address ? shortAddr(address) : "—"}
             </div>
 
             <button
               onClick={handleCopy}
-              disabled={!activeAddress}
+              disabled={!address}
               className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90 disabled:opacity-60"
             >
               {copied ? "Copied" : "Copy"}
@@ -696,9 +610,7 @@ export default function AccountClient() {
           </div>
 
           <div className="mt-3 text-xs text-[var(--re-muted)]">
-            {network.type === "evm"
-              ? "This is your embedded EVM wallet address."
-              : "This is your embedded Solana wallet address."}
+            This is your embedded EVM wallet address.
           </div>
         </div>
 

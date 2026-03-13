@@ -7,7 +7,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
-import { getEvmAddressSafe, getSolanaAddressSafe } from "@/lib/magicSession";
+import {
+  getEvmAddressSafe,
+  getSolanaAddressSafe,
+  switchEvmChainSafe,
+} from "@/lib/magicSession";
 import { ethers } from "ethers";
 import {
   ArrowUpRight,
@@ -15,6 +19,7 @@ import {
   Plus,
   UserRound,
   RefreshCcw,
+  ChevronDown,
 } from "lucide-react";
 
 function shortAddr(addr: string) {
@@ -45,6 +50,25 @@ type Phase =
   | "get-address"
   | "done";
 
+type NetworkType = "evm" | "solana";
+
+type Network = {
+  id: string;
+  type: NetworkType;
+  name: string;
+  // EVM only
+  chainId?: number;
+};
+
+const NETWORKS: Network[] = [
+  { id: "eth", type: "evm", name: "Ethereum", chainId: 1 },
+  { id: "polygon", type: "evm", name: "Polygon", chainId: 137 },
+  { id: "optimism", type: "evm", name: "Optimism", chainId: 10 },
+  { id: "base", type: "evm", name: "Base", chainId: 8453 },
+  { id: "arbitrum", type: "evm", name: "Arbitrum", chainId: 42161 },
+  { id: "solana", type: "solana", name: "Solana" },
+];
+
 export default function AccountClient() {
   const router = useRouter();
 
@@ -61,12 +85,27 @@ export default function AccountClient() {
   const [ready, setReady] = useState(false);
   const [phase, setPhase] = useState<Phase>("init");
 
-  const [address, setAddress] = useState<string>("");
-  const [solanaAddress, setSolanaAddress] = useState<string>("");
+  // Network selection
+  const [network, setNetwork] = useState<Network>(() => {
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("re_network")
+        : null;
+    const found = saved ? NETWORKS.find((n) => n.id === saved) : null;
+    return found ?? NETWORKS[0];
+  });
+  const [switching, setSwitching] = useState(false);
+
+  // Addresses
+  const [evmAddress, setEvmAddress] = useState<string>("");
+  const [solAddress, setSolAddress] = useState<string>("");
+
+  const activeAddress = network.type === "solana" ? solAddress : evmAddress;
+
   const [email, setEmail] = useState<string>("");
   const [issuer, setIssuer] = useState<string>("");
 
-  const [copied, setCopied] = useState<"none" | "evm" | "sol">("none");
+  const [copied, setCopied] = useState(false);
   const [linkStatus, setLinkStatus] = useState<
     "idle" | "linking" | "linked" | "failed"
   >("idle");
@@ -74,7 +113,7 @@ export default function AccountClient() {
   const [syncError, setSyncError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
 
-  // EVM Balance
+  // Balance (EVM only)
   const [balLoading, setBalLoading] = useState(false);
   const [balError, setBalError] = useState("");
   const [ethAmount, setEthAmount] = useState(0);
@@ -88,22 +127,28 @@ export default function AccountClient() {
   const brandGradient =
     "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
 
+  const flashNotice = (msg: string) => {
+    setNotice(msg);
+    window.setTimeout(() => setNotice(""), 3000);
+  };
+
   const handleLogout = async () => {
     if (!magic) return;
     await magic.user.logout();
     router.replace("/auth");
   };
 
-  const copyText = async (value: string, type: "evm" | "sol") => {
+  const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
-      setCopied(type);
-      window.setTimeout(() => setCopied("none"), 1200);
+      await navigator.clipboard.writeText(activeAddress);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
     } catch {}
   };
 
-  const loadBalance = async () => {
-    if (!magic || !address) return;
+  const loadEvmBalance = async () => {
+    if (!magic) return;
+    if (!evmAddress) return;
 
     setBalLoading(true);
     setBalError("");
@@ -136,15 +181,15 @@ export default function AccountClient() {
     }
   };
 
-  const flashNotice = (msg: string) => {
-    setNotice(msg);
-    window.setTimeout(() => setNotice(""), 3000);
-  };
-
   // Widget UI actions (EVM widget)
   const openAddressQR = async () => {
     if (!magic) return;
     if (openingWidget) return;
+
+    if (network.type !== "evm") {
+      flashNotice("QR widget is available on EVM networks.");
+      return;
+    }
 
     setOpeningWidget("receive");
     try {
@@ -160,6 +205,11 @@ export default function AccountClient() {
     if (!magic) return;
     if (openingWidget) return;
 
+    if (network.type !== "evm") {
+      flashNotice("Send widget is available on EVM networks.");
+      return;
+    }
+
     setOpeningWidget("send");
     try {
       await (magic as any).wallet?.showSendTokensUI?.();
@@ -173,6 +223,16 @@ export default function AccountClient() {
   const openOnRamp = async () => {
     if (!magic) return;
     if (openingWidget) return;
+
+    // Magic fiat on-ramp is only supported on Ethereum + Polygon.
+    if (network.type !== "evm" || !network.chainId) {
+      flashNotice("Buy Crypto is available on Ethereum / Polygon.");
+      return;
+    }
+    if (network.chainId !== 1 && network.chainId !== 137) {
+      flashNotice("Buy Crypto is available on Ethereum / Polygon.");
+      return;
+    }
 
     setOpeningWidget("deposit");
     try {
@@ -192,6 +252,7 @@ export default function AccountClient() {
     }
   };
 
+  // Boot + session + addresses
   useEffect(() => {
     let cancelled = false;
 
@@ -219,7 +280,6 @@ export default function AccountClient() {
         const idToken = await magic.user.getIdToken();
 
         setPhase("validate");
-        let validatedIssuer = "";
         try {
           const res = await fetch("/api/auth/magic", {
             method: "POST",
@@ -233,56 +293,43 @@ export default function AccountClient() {
           }
 
           const data = await res.json().catch(() => ({}));
-          validatedIssuer = String(data?.issuer ?? "");
-          if (!cancelled) setIssuer(validatedIssuer);
+          if (!cancelled) setIssuer(String(data?.issuer ?? ""));
         } catch (e: any) {
-          if (!cancelled) {
-            setSyncError(e?.message ?? "Failed to validate session");
-          }
+          if (!cancelled) setSyncError(e?.message ?? "Failed to validate session");
         }
 
         setPhase("get-address");
-        const [evmAddr, solAddr] = await Promise.all([
-          getEvmAddressSafe(magic),
-          getSolanaAddressSafe(magic),
-        ]);
+
+        // Provision EVM address
+        const evmAddr = await getEvmAddressSafe(magic);
+        if (!cancelled) setEvmAddress(evmAddr);
+
+        // Provision Solana address (if extension is configured)
+        const solAddr = await getSolanaAddressSafe(magic);
+        if (!cancelled) setSolAddress(solAddr);
 
         if (cancelled) return;
 
-        setAddress(evmAddr || "");
-        setSolanaAddress(solAddr || "");
-
-        try {
-          if (validatedIssuer && (evmAddr || solAddr)) {
+        // Link EVM address to issuer for your app logic
+        if (evmAddr && issuer) {
+          try {
             setLinkStatus("linking");
-            localStorage.setItem(
-              `re_wallet_${validatedIssuer}`,
-              JSON.stringify({
-                evmAddress: evmAddr || "",
-                solanaAddress: solAddr || "",
-              })
-            );
+            localStorage.setItem(`re_wallet_${issuer}`, evmAddr);
             setLinkStatus("linked");
+          } catch {
+            setLinkStatus("failed");
           }
-        } catch {
-          setLinkStatus("failed");
-        }
 
-        fetch("/api/account/wallet", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            idToken,
-            evmAddress: evmAddr || "",
-            solanaAddress: solAddr || "",
-          }),
-        }).catch(() => {});
+          fetch("/api/account/wallet", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken, address: evmAddr }),
+          }).catch(() => {});
+        }
 
         setPhase("done");
       } catch (e: any) {
-        if (!cancelled) {
-          setSyncError(e?.message ?? "Unknown error on account page");
-        }
+        if (!cancelled) setSyncError(e?.message ?? "Unknown error on account page");
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -291,13 +338,49 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [magic, magicInitError, router]);
+  }, [magic, magicInitError, router, issuer]);
 
+  // Apply network switch when selecting an EVM chain
   useEffect(() => {
-    if (!magic || !address) return;
-    loadBalance();
+    if (!magic) return;
+
+    (async () => {
+      try {
+        setSwitching(true);
+        setSyncError("");
+        setBalError("");
+
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("re_network", network.id);
+        }
+
+        if (network.type === "evm" && network.chainId) {
+          await switchEvmChainSafe(magic, network.chainId);
+
+          // Ensure EVM address exists (same address, but we keep it fresh)
+          const evmAddr = evmAddress || (await getEvmAddressSafe(magic));
+          setEvmAddress(evmAddr);
+
+          // Refresh balance on chain switch
+          await loadEvmBalance();
+        }
+      } catch (e: any) {
+        setSyncError(e?.message ?? "Network switch failed");
+      } finally {
+        setSwitching(false);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [magic, address]);
+  }, [network.id]);
+
+  // Load balance when EVM address becomes available and on EVM networks
+  useEffect(() => {
+    if (!magic) return;
+    if (!evmAddress) return;
+    if (network.type !== "evm") return;
+    loadEvmBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [magic, evmAddress]);
 
   const showLinking = issuer && linkStatus === "linking";
   const showConnected = issuer && linkStatus === "linked";
@@ -312,7 +395,7 @@ export default function AccountClient() {
         : phase === "validate"
         ? "Securing your sign-in…"
         : phase === "get-address"
-        ? "Setting up your wallets…"
+        ? "Setting up your wallet…"
         : "Loading your account…";
 
     const subtitle =
@@ -323,7 +406,7 @@ export default function AccountClient() {
         : phase === "validate"
         ? "Confirming your secure session."
         : phase === "get-address"
-        ? "Creating your embedded wallet addresses."
+        ? "Creating your embedded wallet address."
         : "Almost there.";
 
     return (
@@ -423,13 +506,13 @@ export default function AccountClient() {
     );
   }
 
-  if (ready && !address && !solanaAddress) {
+  if (ready && !evmAddress && !solAddress) {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
         <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
           <div className="re-card rounded-3xl p-7">
-            <div className="text-2xl font-semibold">Finalizing your wallets…</div>
+            <div className="text-2xl font-semibold">Finalizing your wallet…</div>
             <div className="mt-2 text-sm re-subtle">
               This can take a few seconds the first time.
             </div>
@@ -456,13 +539,7 @@ export default function AccountClient() {
     );
   }
 
-  const headerSub = email
-    ? `Signed in as ${email}`
-    : address
-    ? `EVM ${shortAddr(address)}`
-    : solanaAddress
-    ? `Solana ${shortAddr(solanaAddress)}`
-    : "Wallet loading";
+  const headerSub = email ? `Signed in as ${email}` : "Signed in";
 
   return (
     <main className="relative min-h-screen">
@@ -481,7 +558,6 @@ export default function AccountClient() {
                 priority
               />
             </div>
-
             <div>
               <div className="text-lg font-semibold">Account</div>
               <div className="flex items-center gap-2 text-sm text-[var(--re-muted)]">
@@ -497,6 +573,33 @@ export default function AccountClient() {
           >
             Logout
           </button>
+        </div>
+
+        {/* Network selector */}
+        <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/60 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] text-[var(--re-muted)]">
+              Network {switching ? "• switching…" : ""}
+            </div>
+            <div className="relative">
+              <select
+                value={network.id}
+                onChange={(e) => {
+                  const next = NETWORKS.find((n) => n.id === e.target.value);
+                  if (next) setNetwork(next);
+                }}
+                className="appearance-none rounded-xl border border-[var(--re-border)] bg-white/80 px-3 py-2 pr-9 text-sm font-semibold"
+                disabled={switching}
+              >
+                {NETWORKS.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--re-muted)]" />
+            </div>
+          </div>
         </div>
 
         {(syncError || showLinking || showConnected || showConnFailed) && (
@@ -535,27 +638,43 @@ export default function AccountClient() {
           </div>
         ) : null}
 
-        {/* EVM Balance */}
+        {/* Balance (EVM only) */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs text-[var(--re-muted)]">EVM wallet balance</div>
+              <div className="text-xs text-[var(--re-muted)]">
+                {network.type === "evm" ? "Account balance" : "Account balance"}
+              </div>
+
               <div className="mt-2 text-3xl font-semibold tracking-tight">
-                {balLoading ? "Loading…" : formatUSD(usdAmount)}
+                {network.type === "evm"
+                  ? balLoading
+                    ? "Loading…"
+                    : formatUSD(usdAmount)
+                  : "—"}
               </div>
+
               <div className="mt-1 text-xs text-[var(--re-muted)]">
-                {balLoading
-                  ? "Fetching latest rate"
-                  : `${formatEth(ethAmount)} • ${
-                      ethPriceUsd ? `$${ethPriceUsd.toFixed(2)} / ETH` : "—"
-                    }`}
+                {network.type === "evm"
+                  ? balLoading
+                    ? "Fetching latest rate"
+                    : `${formatEth(ethAmount)} • ${
+                        ethPriceUsd ? `$${ethPriceUsd.toFixed(2)} / ETH` : "—"
+                      }`
+                  : "Balance display for Solana can be added next."}
               </div>
-              {balError ? <div className="mt-2 text-xs text-red-700">{balError}</div> : null}
+
+              {network.type === "evm" && balError ? (
+                <div className="mt-2 text-xs text-red-700">{balError}</div>
+              ) : null}
             </div>
 
             <button
-              onClick={loadBalance}
-              disabled={balLoading || !address}
+              onClick={() => {
+                if (network.type === "evm") loadEvmBalance();
+                else flashNotice("Solana balance display will be added next.");
+              }}
+              disabled={network.type === "evm" ? balLoading : false}
               className="rounded-2xl px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
               style={{ background: brandGradient }}
               title="Refresh balance"
@@ -568,11 +687,11 @@ export default function AccountClient() {
           </div>
         </div>
 
-        {/* EVM Widget Actions */}
+        {/* Actions */}
         <div className="mt-4 grid grid-cols-3 gap-3">
           <button
             onClick={openSendUI}
-            disabled={!!openingWidget || !address}
+            disabled={!!openingWidget || switching}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <ArrowUpRight className="mx-auto h-5 w-5" />
@@ -582,7 +701,7 @@ export default function AccountClient() {
 
           <button
             onClick={openAddressQR}
-            disabled={!!openingWidget || !address}
+            disabled={!!openingWidget || switching}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <ArrowDownLeft className="mx-auto h-5 w-5" />
@@ -592,7 +711,7 @@ export default function AccountClient() {
 
           <button
             onClick={openOnRamp}
-            disabled={!!openingWidget || !address}
+            disabled={!!openingWidget || switching}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <Plus className="mx-auto h-5 w-5" />
@@ -601,54 +720,28 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Wallets */}
+        {/* Wallet */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
-          <div className="text-xs text-[var(--re-muted)]">Wallets</div>
+          <div className="text-xs text-[var(--re-muted)]">Wallet address</div>
 
-          <div className="mt-4 space-y-4">
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--re-muted)]">
-                EVM wallet
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold">
-                  {address ? shortAddr(address) : "Not ready"}
-                </div>
-
-                {address ? (
-                  <button
-                    onClick={() => copyText(address, "evm")}
-                    className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90"
-                  >
-                    {copied === "evm" ? "Copied" : "Copy"}
-                  </button>
-                ) : null}
-              </div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold">
+              {activeAddress ? shortAddr(activeAddress) : "—"}
             </div>
 
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--re-muted)]">
-                Solana wallet
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold">
-                  {solanaAddress ? shortAddr(solanaAddress) : "Not ready"}
-                </div>
-
-                {solanaAddress ? (
-                  <button
-                    onClick={() => copyText(solanaAddress, "sol")}
-                    className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90"
-                  >
-                    {copied === "sol" ? "Copied" : "Copy"}
-                  </button>
-                ) : null}
-              </div>
-            </div>
+            <button
+              onClick={handleCopy}
+              disabled={!activeAddress}
+              className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90 disabled:opacity-60"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
           </div>
 
           <div className="mt-3 text-xs text-[var(--re-muted)]">
-            If a Solana address is shown above, the Solana wallet has been created.
+            {network.type === "evm"
+              ? "This is your embedded EVM wallet address."
+              : "This is your embedded Solana wallet address."}
           </div>
         </div>
 

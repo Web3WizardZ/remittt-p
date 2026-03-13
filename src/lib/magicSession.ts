@@ -8,11 +8,7 @@ function looksLikeEvmAddress(addr: unknown): addr is string {
   return typeof addr === "string" && addr.startsWith("0x") && addr.length >= 42;
 }
 
-function looksLikeSolanaAddress(addr: unknown): addr is string {
-  return typeof addr === "string" && addr.length >= 32 && !addr.startsWith("0x");
-}
-
-async function tryFromUserInfo(magic: any): Promise<string> {
+async function tryFromUserInfoEvm(magic: any): Promise<string> {
   try {
     const info = await magic?.user?.getInfo?.();
     const a =
@@ -21,7 +17,6 @@ async function tryFromUserInfo(magic: any): Promise<string> {
       info?.wallets?.[0]?.publicAddress ??
       info?.publicAddress ??
       info?.public_address;
-
     return looksLikeEvmAddress(a) ? a : "";
   } catch {
     return "";
@@ -49,10 +44,21 @@ async function tryFromRpc(magic: any): Promise<string> {
   }
 }
 
-async function forceProvisioning(magic: any) {
+async function forceProvisioningEvm(magic: any) {
   try {
     await magic?.rpcProvider?.request?.({ method: "eth_requestAccounts" });
   } catch {}
+}
+
+export async function switchEvmChainSafe(magic: any, chainId: number) {
+  try {
+    await magic?.evm?.switchChain?.(chainId);
+  } catch {
+    await magic?.rpcProvider?.request?.({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: `0x${chainId.toString(16)}` }],
+    });
+  }
 }
 
 export async function getEvmAddressSafe(
@@ -63,7 +69,7 @@ export async function getEvmAddressSafe(
   const delayMs = opts?.delayMs ?? 250;
 
   for (let i = 0; i < tries; i++) {
-    const a1 = await tryFromUserInfo(magic);
+    const a1 = await tryFromUserInfoEvm(magic);
     if (a1) return a1;
 
     const a2 = await tryFromEthers(magic);
@@ -73,7 +79,7 @@ export async function getEvmAddressSafe(
     if (a3) return a3;
 
     if (i === Math.floor(tries / 2)) {
-      await forceProvisioning(magic);
+      await forceProvisioningEvm(magic);
     }
 
     await sleep(delayMs);
@@ -86,23 +92,20 @@ export async function getSolanaAddressSafe(
   magic: any,
   opts?: { tries?: number; delayMs?: number }
 ): Promise<string> {
-  const tries = opts?.tries ?? 12;
+  const tries = opts?.tries ?? 18;
   const delayMs = opts?.delayMs ?? 250;
 
   for (let i = 0; i < tries; i++) {
     try {
-      const metadata = await magic?.user?.getMetadata?.();
-      const a = metadata?.publicAddress;
-      if (looksLikeSolanaAddress(a)) return a;
+      const addr = await magic?.solana?.getPublicAddress?.();
+      if (typeof addr === "string" && addr.length > 20) return addr;
     } catch {}
-
     await sleep(delayMs);
   }
 
   return "";
 }
 
-// Backward-compatible alias
 export async function waitForEvmAddress(magic: any) {
   return getEvmAddressSafe(magic);
 }

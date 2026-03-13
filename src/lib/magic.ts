@@ -3,31 +3,41 @@ import { Magic } from "magic-sdk";
 import { EVMExtension } from "@magic-ext/evm";
 import { SolanaExtension } from "@magic-ext/solana";
 
-let magic: ReturnType<typeof createMagic> | null = null;
+type MagicWithExtensions = ReturnType<typeof createMagic>;
 
-function createMagic() {
-  return new Magic(process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY!, {
+let magicSingleton: MagicWithExtensions | null = null;
+
+function createMagic(publishableKey: string) {
+  return new Magic(publishableKey, {
     extensions: [
       new EVMExtension([
-        {
-          rpcUrl: process.env.NEXT_PUBLIC_EVM_RPC_URL!,
-          chainId: Number(process.env.NEXT_PUBLIC_EVM_CHAIN_ID || 1),
-          default: true,
-        },
+        { chainId: 1, rpcUrl: "https://rpc.ankr.com/eth", default: true },
+        { chainId: 137, rpcUrl: "https://polygon-rpc.com" },
+        { chainId: 10, rpcUrl: "https://mainnet.optimism.io" },
+        { chainId: 8453, rpcUrl: "https://mainnet.base.org" },
+        { chainId: 42161, rpcUrl: "https://arb1.arbitrum.io/rpc" },
       ]),
       new SolanaExtension({
-        rpcUrl: process.env.NEXT_PUBLIC_SOLANA_RPC_URL!,
+        rpcUrl:
+          process.env.NEXT_PUBLIC_SOLANA_RPC_URL ??
+          "https://api.mainnet-beta.solana.com",
       }),
     ],
   });
 }
 
-export function getMagic() {
-  if (typeof window === "undefined") return null;
-
-  if (!magic) {
-    magic = createMagic();
+export function getMagic(): MagicWithExtensions {
+  if (typeof window === "undefined") {
+    throw new Error("Magic must be initialized in the browser");
   }
 
-  return magic;
+  if (magicSingleton) return magicSingleton;
+
+  const publishableKey = process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY;
+  if (!publishableKey) {
+    throw new Error("Missing NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY");
+  }
+
+  magicSingleton = createMagic(publishableKey);
+  return magicSingleton;
 }

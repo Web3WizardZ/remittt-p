@@ -13,10 +13,10 @@ const RPC = {
   POLYGON:
     env("NEXT_PUBLIC_RPC_POLYGON") || "https://polygon-bor-rpc.publicnode.com",
   OPTIMISM:
-    env("NEXT_PUBLIC_RPC_OPTIMISM") || "https://optimism.publicnode.com",
-  BASE: env("NEXT_PUBLIC_RPC_BASE") || "https://base.publicnode.com",
+    env("NEXT_PUBLIC_RPC_OPTIMISM") || "https://optimism-rpc.publicnode.com",
+  BASE: env("NEXT_PUBLIC_RPC_BASE") || "https://base-rpc.publicnode.com",
   ARBITRUM:
-    env("NEXT_PUBLIC_RPC_ARBITRUM") || "https://arbitrum-one.publicnode.com",
+    env("NEXT_PUBLIC_RPC_ARBITRUM") || "https://arbitrum-one-rpc.publicnode.com",
   SOLANA:
     env("NEXT_PUBLIC_SOLANA_RPC_URL") || "https://api.mainnet-beta.solana.com",
 };
@@ -53,4 +53,5 @@ export function getMagic() {
   return magicInstance;
 }
 
+export const CHAIN_RPC = RPC;
 export default getMagic;

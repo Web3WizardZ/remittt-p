@@ -26,8 +26,9 @@ async function tryFromUserInfoEvm(magic: any): Promise<string> {
 async function tryFromEthers(magic: any): Promise<string> {
   try {
     const provider = new ethers.BrowserProvider(magic.rpcProvider);
-    const accounts = await provider.listAccounts();
-    const a = accounts?.[0]?.address;
+    await provider.send("eth_requestAccounts", []);
+    const signer = await provider.getSigner();
+    const a = await signer.getAddress();
     return looksLikeEvmAddress(a) ? a : "";
   } catch {
     return "";
@@ -53,12 +54,15 @@ async function forceProvisioningEvm(magic: any) {
 export async function switchEvmChainSafe(magic: any, chainId: number) {
   try {
     await magic?.evm?.switchChain?.(chainId);
-  } catch {
+    return;
+  } catch {}
+
+  try {
     await magic?.rpcProvider?.request?.({
       method: "wallet_switchEthereumChain",
       params: [{ chainId: `0x${chainId.toString(16)}` }],
     });
-  }
+  } catch {}
 }
 
 export async function getEvmAddressSafe(
@@ -106,7 +110,6 @@ export async function getSolanaAddressSafe(
   return "";
 }
 
-// Back-compat alias
 export async function waitForEvmAddress(magic: any) {
   return getEvmAddressSafe(magic);
 }

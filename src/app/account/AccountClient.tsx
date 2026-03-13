@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
-import { getEvmAddressSafe } from "@/lib/magicSession";
+import { getEvmAddressSafe, getSolanaAddressSafe } from "@/lib/magicSession";
 import { ethers } from "ethers";
 import {
   ArrowUpRight,
@@ -62,26 +62,25 @@ export default function AccountClient() {
   const [phase, setPhase] = useState<Phase>("init");
 
   const [address, setAddress] = useState<string>("");
+  const [solanaAddress, setSolanaAddress] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [issuer, setIssuer] = useState<string>("");
 
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"none" | "evm" | "sol">("none");
   const [linkStatus, setLinkStatus] = useState<
     "idle" | "linking" | "linked" | "failed"
   >("idle");
 
-  // IMPORTANT: keep sync/session errors separate from widget errors
   const [syncError, setSyncError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
 
-  // Balance
+  // EVM Balance
   const [balLoading, setBalLoading] = useState(false);
   const [balError, setBalError] = useState("");
   const [ethAmount, setEthAmount] = useState(0);
   const [usdAmount, setUsdAmount] = useState(0);
   const [ethPriceUsd, setEthPriceUsd] = useState(0);
 
-  // Prevent double-tap / iOS “stuck overlay” when widget fails
   const [openingWidget, setOpeningWidget] = useState<
     null | "send" | "receive" | "deposit"
   >(null);
@@ -95,16 +94,16 @@ export default function AccountClient() {
     router.replace("/auth");
   };
 
-  const handleCopy = async () => {
+  const copyText = async (value: string, type: "evm" | "sol") => {
     try {
-      await navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      await navigator.clipboard.writeText(value);
+      setCopied(type);
+      window.setTimeout(() => setCopied("none"), 1200);
     } catch {}
   };
 
   const loadBalance = async () => {
-    if (!magic) return;
+    if (!magic || !address) return;
 
     setBalLoading(true);
     setBalError("");
@@ -142,7 +141,7 @@ export default function AccountClient() {
     window.setTimeout(() => setNotice(""), 3000);
   };
 
-  // Widget UI actions (section-specific)
+  // Widget UI actions (EVM widget)
   const openAddressQR = async () => {
     if (!magic) return;
     if (openingWidget) return;
@@ -177,11 +176,8 @@ export default function AccountClient() {
 
     setOpeningWidget("deposit");
     try {
-      // Direct on-ramp (best case)
       await (magic as any).wallet?.showOnRamp?.();
     } catch (e: any) {
-      // If on-ramp isn't enabled / KYB not complete / network unsupported,
-      // fall back to full wallet UI instead of putting the page in an “error state”
       try {
         await (magic as any).wallet?.showUI?.();
         flashNotice("Buy Crypto is not enabled yet — opened Wallet instead.");
@@ -196,7 +192,6 @@ export default function AccountClient() {
     }
   };
 
-  // Boot + session + address
   useEffect(() => {
     let cancelled = false;
 
@@ -224,6 +219,7 @@ export default function AccountClient() {
         const idToken = await magic.user.getIdToken();
 
         setPhase("validate");
+        let validatedIssuer = "";
         try {
           const res = await fetch("/api/auth/magic", {
             method: "POST",
@@ -237,41 +233,56 @@ export default function AccountClient() {
           }
 
           const data = await res.json().catch(() => ({}));
-          if (!cancelled) setIssuer(String(data?.issuer ?? ""));
+          validatedIssuer = String(data?.issuer ?? "");
+          if (!cancelled) setIssuer(validatedIssuer);
         } catch (e: any) {
-          if (!cancelled) setSyncError(e?.message ?? "Failed to validate session");
+          if (!cancelled) {
+            setSyncError(e?.message ?? "Failed to validate session");
+          }
         }
 
         setPhase("get-address");
-        const addr = await getEvmAddressSafe(magic);
+        const [evmAddr, solAddr] = await Promise.all([
+          getEvmAddressSafe(magic),
+          getSolanaAddressSafe(magic),
+        ]);
 
         if (cancelled) return;
 
-        if (addr) {
-          setAddress(addr);
+        setAddress(evmAddr || "");
+        setSolanaAddress(solAddr || "");
 
-          try {
-            if (issuer) {
-              setLinkStatus("linking");
-              localStorage.setItem(`re_wallet_${issuer}`, addr);
-              setLinkStatus("linked");
-            }
-          } catch {
-            setLinkStatus("failed");
+        try {
+          if (validatedIssuer && (evmAddr || solAddr)) {
+            setLinkStatus("linking");
+            localStorage.setItem(
+              `re_wallet_${validatedIssuer}`,
+              JSON.stringify({
+                evmAddress: evmAddr || "",
+                solanaAddress: solAddr || "",
+              })
+            );
+            setLinkStatus("linked");
           }
-
-          fetch("/api/account/wallet", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ idToken, address: addr }),
-          }).catch(() => {});
-        } else {
-          setAddress("");
+        } catch {
+          setLinkStatus("failed");
         }
+
+        fetch("/api/account/wallet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idToken,
+            evmAddress: evmAddr || "",
+            solanaAddress: solAddr || "",
+          }),
+        }).catch(() => {});
 
         setPhase("done");
       } catch (e: any) {
-        if (!cancelled) setSyncError(e?.message ?? "Unknown error on account page");
+        if (!cancelled) {
+          setSyncError(e?.message ?? "Unknown error on account page");
+        }
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -280,7 +291,7 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [magic, magicInitError, router, issuer]);
+  }, [magic, magicInitError, router]);
 
   useEffect(() => {
     if (!magic || !address) return;
@@ -301,7 +312,7 @@ export default function AccountClient() {
         : phase === "validate"
         ? "Securing your sign-in…"
         : phase === "get-address"
-        ? "Setting up your wallet…"
+        ? "Setting up your wallets…"
         : "Loading your account…";
 
     const subtitle =
@@ -312,7 +323,7 @@ export default function AccountClient() {
         : phase === "validate"
         ? "Confirming your secure session."
         : phase === "get-address"
-        ? "Creating your embedded wallet address."
+        ? "Creating your embedded wallet addresses."
         : "Almost there.";
 
     return (
@@ -412,13 +423,13 @@ export default function AccountClient() {
     );
   }
 
-  if (ready && !address) {
+  if (ready && !address && !solanaAddress) {
     return (
       <main className="relative min-h-screen">
         <AnimatedBackground />
         <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
           <div className="re-card rounded-3xl p-7">
-            <div className="text-2xl font-semibold">Finalizing your wallet…</div>
+            <div className="text-2xl font-semibold">Finalizing your wallets…</div>
             <div className="mt-2 text-sm re-subtle">
               This can take a few seconds the first time.
             </div>
@@ -445,7 +456,13 @@ export default function AccountClient() {
     );
   }
 
-  const headerSub = email ? `Signed in as ${email}` : `Wallet ${shortAddr(address)}`;
+  const headerSub = email
+    ? `Signed in as ${email}`
+    : address
+    ? `EVM ${shortAddr(address)}`
+    : solanaAddress
+    ? `Solana ${shortAddr(solanaAddress)}`
+    : "Wallet loading";
 
   return (
     <main className="relative min-h-screen">
@@ -518,11 +535,11 @@ export default function AccountClient() {
           </div>
         ) : null}
 
-        {/* Balance */}
+        {/* EVM Balance */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs text-[var(--re-muted)]">Account balance</div>
+              <div className="text-xs text-[var(--re-muted)]">EVM wallet balance</div>
               <div className="mt-2 text-3xl font-semibold tracking-tight">
                 {balLoading ? "Loading…" : formatUSD(usdAmount)}
               </div>
@@ -538,7 +555,7 @@ export default function AccountClient() {
 
             <button
               onClick={loadBalance}
-              disabled={balLoading}
+              disabled={balLoading || !address}
               className="rounded-2xl px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
               style={{ background: brandGradient }}
               title="Refresh balance"
@@ -551,11 +568,11 @@ export default function AccountClient() {
           </div>
         </div>
 
-        {/* Actions (widget sections) */}
+        {/* EVM Widget Actions */}
         <div className="mt-4 grid grid-cols-3 gap-3">
           <button
             onClick={openSendUI}
-            disabled={!!openingWidget}
+            disabled={!!openingWidget || !address}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <ArrowUpRight className="mx-auto h-5 w-5" />
@@ -565,7 +582,7 @@ export default function AccountClient() {
 
           <button
             onClick={openAddressQR}
-            disabled={!!openingWidget}
+            disabled={!!openingWidget || !address}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <ArrowDownLeft className="mx-auto h-5 w-5" />
@@ -575,7 +592,7 @@ export default function AccountClient() {
 
           <button
             onClick={openOnRamp}
-            disabled={!!openingWidget}
+            disabled={!!openingWidget || !address}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <Plus className="mx-auto h-5 w-5" />
@@ -584,23 +601,54 @@ export default function AccountClient() {
           </button>
         </div>
 
-        {/* Wallet */}
+        {/* Wallets */}
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
-          <div className="text-xs text-[var(--re-muted)]">Wallet address</div>
+          <div className="text-xs text-[var(--re-muted)]">Wallets</div>
 
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold">{shortAddr(address)}</div>
+          <div className="mt-4 space-y-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--re-muted)]">
+                EVM wallet
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">
+                  {address ? shortAddr(address) : "Not ready"}
+                </div>
 
-            <button
-              onClick={handleCopy}
-              className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90"
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
+                {address ? (
+                  <button
+                    onClick={() => copyText(address, "evm")}
+                    className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90"
+                  >
+                    {copied === "evm" ? "Copied" : "Copy"}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--re-muted)]">
+                Solana wallet
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">
+                  {solanaAddress ? shortAddr(solanaAddress) : "Not ready"}
+                </div>
+
+                {solanaAddress ? (
+                  <button
+                    onClick={() => copyText(solanaAddress, "sol")}
+                    className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90"
+                  >
+                    {copied === "sol" ? "Copied" : "Copy"}
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <div className="mt-3 text-xs text-[var(--re-muted)]">
-            This is your embedded wallet address created at signup/login.
+            If a Solana address is shown above, the Solana wallet has been created.
           </div>
         </div>
 

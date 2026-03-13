@@ -8,6 +8,10 @@ function looksLikeEvmAddress(addr: unknown): addr is string {
   return typeof addr === "string" && addr.startsWith("0x") && addr.length >= 42;
 }
 
+function looksLikeSolanaAddress(addr: unknown): addr is string {
+  return typeof addr === "string" && addr.length >= 32 && !addr.startsWith("0x");
+}
+
 async function tryFromUserInfo(magic: any): Promise<string> {
   try {
     const info = await magic?.user?.getInfo?.();
@@ -78,7 +82,27 @@ export async function getEvmAddressSafe(
   return "";
 }
 
-// Optional alias if any older files still import this name
+export async function getSolanaAddressSafe(
+  magic: any,
+  opts?: { tries?: number; delayMs?: number }
+): Promise<string> {
+  const tries = opts?.tries ?? 12;
+  const delayMs = opts?.delayMs ?? 250;
+
+  for (let i = 0; i < tries; i++) {
+    try {
+      const metadata = await magic?.user?.getMetadata?.();
+      const a = metadata?.publicAddress;
+      if (looksLikeSolanaAddress(a)) return a;
+    } catch {}
+
+    await sleep(delayMs);
+  }
+
+  return "";
+}
+
+// Backward-compatible alias
 export async function waitForEvmAddress(magic: any) {
   return getEvmAddressSafe(magic);
 }

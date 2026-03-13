@@ -12,7 +12,7 @@ const magicInstance =
               chainId: 8453,
             },
             {
-              rpcUrl: "https://bsc-dataseed.binance.org/",
+              rpcUrl: "https://bsc-dataseed-public.bnbchain.org",
               chainId: 56,
             },
             {

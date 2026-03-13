@@ -6,7 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getMagic } from "@/lib/magic";
+import { getMagic, solanaRpcUrl } from "@/lib/magic";
 import { getEvmAddressSafe, switchEvmChainSafe } from "@/lib/magicSession";
 import { ethers } from "ethers";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
@@ -70,6 +70,7 @@ export default function AccountClient() {
   const router = useRouter();
 
   const [magicInitError, setMagicInitError] = useState<string>("");
+
   const magic = useMemo(() => {
     try {
       return getMagic();
@@ -90,6 +91,7 @@ export default function AccountClient() {
     const found = saved ? NETWORKS.find((n) => n.id === saved) : null;
     return found ?? NETWORKS[0];
   });
+
   const [switching, setSwitching] = useState(false);
 
   const [address, setAddress] = useState("");
@@ -133,6 +135,7 @@ export default function AccountClient() {
 
   const handleCopy = async () => {
     try {
+      if (!displayAddress) return;
       await navigator.clipboard.writeText(displayAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
@@ -147,6 +150,10 @@ export default function AccountClient() {
 
     try {
       if (network.id === "sol") {
+        if (!solanaRpcUrl) {
+          throw new Error("Missing NEXT_PUBLIC_SOLANA_RPC_URL");
+        }
+
         const activeSolAddress =
           solAddress || (await (magic as any)?.solana?.getPublicAddress?.());
 
@@ -156,18 +163,23 @@ export default function AccountClient() {
 
         setSolAddress(activeSolAddress);
 
-        const connection = new Connection("https://api.mainnet-beta.solana.com");
+        const connection = new Connection(solanaRpcUrl, "confirmed");
         const lamports = await connection.getBalance(
-          new PublicKey(activeSolAddress)
+          new PublicKey(activeSolAddress),
+          "confirmed"
         );
         const sol = lamports / LAMPORTS_PER_SOL;
 
-        const priceRes = await fetch(
-          "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
-          { cache: "no-store" }
-        );
+        const priceRes = await fetch("/api/price/native?chainId=999", {
+          cache: "no-store",
+        });
         const priceJson = await priceRes.json().catch(() => ({}));
-        const price = Number(priceJson?.solana?.usd ?? 0);
+
+        if (!priceRes.ok) {
+          throw new Error(priceJson?.error ?? "Price unavailable");
+        }
+
+        const price = Number(priceJson?.usd ?? 0);
 
         setNativeAmount(sol);
         setNativePriceUsd(price || null);
@@ -194,7 +206,10 @@ export default function AccountClient() {
         { cache: "no-store" }
       );
       const priceJson = await priceRes.json().catch(() => ({}));
-      if (!priceRes.ok) throw new Error(priceJson?.error ?? "Price unavailable");
+
+      if (!priceRes.ok) {
+        throw new Error(priceJson?.error ?? "Price unavailable");
+      }
 
       const price = Number(priceJson?.usd ?? 0);
       const usd = native * price;
@@ -221,6 +236,7 @@ export default function AccountClient() {
     }
 
     setOpeningWidget("receive");
+
     try {
       await switchEvmChainSafe(magic, network.chainId);
       await (magic as any).wallet?.showAddress?.();
@@ -240,6 +256,7 @@ export default function AccountClient() {
     }
 
     setOpeningWidget("send");
+
     try {
       await switchEvmChainSafe(magic, network.chainId);
       await (magic as any).wallet?.showSendTokensUI?.();
@@ -259,6 +276,7 @@ export default function AccountClient() {
     }
 
     setOpeningWidget("deposit");
+
     try {
       await switchEvmChainSafe(magic, network.chainId);
       await (magic as any).wallet?.showOnRamp?.();
@@ -289,12 +307,14 @@ export default function AccountClient() {
 
         setPhase("check-login");
         const loggedIn = await magic.user.isLoggedIn();
+
         if (!loggedIn) {
           if (!cancelled) router.replace("/auth");
           return;
         }
 
         setPhase("get-info");
+
         try {
           const info = await magic.user.getInfo();
           const em = (info as any)?.email as string | undefined;
@@ -304,6 +324,9 @@ export default function AccountClient() {
         const idToken = await magic.user.getIdToken();
 
         setPhase("validate");
+
+        let nextIssuer = "";
+
         try {
           const res = await fetch("/api/auth/magic", {
             method: "POST",
@@ -317,7 +340,11 @@ export default function AccountClient() {
           }
 
           const data = await res.json().catch(() => ({}));
-          if (!cancelled) setIssuer(String(data?.issuer ?? ""));
+          nextIssuer = String(data?.issuer ?? "");
+
+          if (!cancelled) {
+            setIssuer(nextIssuer);
+          }
         } catch (e: any) {
           if (!cancelled) {
             setSyncError(e?.message ?? "Failed to validate session");
@@ -336,10 +363,10 @@ export default function AccountClient() {
 
         if (cancelled) return;
 
-        if (evmAddr && issuer) {
+        if (evmAddr && nextIssuer) {
           try {
             setLinkStatus("linking");
-            localStorage.setItem(`re_wallet_${issuer}`, evmAddr);
+            localStorage.setItem(`re_wallet_${nextIssuer}`, evmAddr);
             setLinkStatus("linked");
           } catch {
             setLinkStatus("failed");
@@ -367,11 +394,12 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [magic, magicInitError, router, issuer]);
+  }, [magic, magicInitError, router]);
 
   useEffect(() => {
     if (!magic) return;
     if (network.id !== "sol" && !address) return;
+    if (network.id === "sol" && !solAddress) return;
 
     (async () => {
       try {
@@ -417,12 +445,12 @@ export default function AccountClient() {
       phase === "check-login"
         ? "Just a moment while we verify you."
         : phase === "get-info"
-        ? "Fetching your profile details."
-        : phase === "validate"
-        ? "Confirming your secure session."
-        : phase === "get-address"
-        ? "Preparing your embedded wallet."
-        : "Almost there.";
+          ? "Fetching your profile details."
+          : phase === "validate"
+            ? "Confirming your secure session."
+            : phase === "get-address"
+              ? "Preparing your embedded wallet."
+              : "Almost there.";
 
     return (
       <main className="relative min-h-screen">
@@ -441,7 +469,9 @@ export default function AccountClient() {
                 />
               </div>
               <div>
-                <div className="text-lg font-semibold leading-tight">RemittEase</div>
+                <div className="text-lg font-semibold leading-tight">
+                  RemittEase
+                </div>
                 <div className="text-xs re-subtle">Getting things ready</div>
               </div>
             </div>
@@ -457,7 +487,8 @@ export default function AccountClient() {
               <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                 <div className="font-semibold">We hit a snag</div>
                 <div className="mt-1">
-                  Please refresh the page. If it keeps happening, sign out and try again.
+                  Please refresh the page. If it keeps happening, sign out and
+                  try again.
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-3">
@@ -552,10 +583,10 @@ export default function AccountClient() {
               {syncError
                 ? "Sync issue — some features may be limited."
                 : showConnFailed
-                ? "Connection issue — refresh."
-                : showLinking
-                ? "Connecting…"
-                : "Connected"}
+                  ? "Connection issue — refresh."
+                  : showLinking
+                    ? "Connecting…"
+                    : "Connected"}
             </div>
 
             {syncError || showConnFailed ? (
@@ -585,7 +616,9 @@ export default function AccountClient() {
         <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs text-[var(--re-muted)]">Account balance</div>
+              <div className="text-xs text-[var(--re-muted)]">
+                Account balance
+              </div>
 
               <div className="mt-2 text-3xl font-semibold tracking-tight">
                 {balLoading ? "Loading…" : formatUSD(usdAmount)}

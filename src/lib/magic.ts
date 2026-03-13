@@ -1,6 +1,6 @@
-// src/lib/magic.ts
 import { Magic } from "magic-sdk";
 import { EVMExtension } from "@magic-ext/evm";
+import { SolanaExtension } from "@magic-ext/solana";
 
 const magicInstance =
   typeof window !== "undefined"
@@ -16,8 +16,8 @@ const magicInstance =
               chainId: 10,
             },
             {
-              rpcUrl: "https://polygon-rpc.com/",
-              chainId: 137,
+              rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+              chainId: 43114,
             },
             {
               rpcUrl: "https://forno.celo.org",
@@ -28,6 +28,9 @@ const magicInstance =
               chainId: 42161,
             },
           ]),
+          new SolanaExtension({
+            rpcUrl: "https://api.mainnet-beta.solana.com",
+          }),
         ],
       })
     : null;

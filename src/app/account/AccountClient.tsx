@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { getMagic } from "@/lib/magic";
 import { getEvmAddressSafe, switchEvmChainSafe } from "@/lib/magicSession";
 import { ethers } from "ethers";
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import {
   ArrowUpRight,
   ArrowDownLeft,
@@ -46,8 +47,10 @@ type Phase =
   | "get-address"
   | "done";
 
+type NetworkId = "eth" | "base" | "op" | "avax" | "celo" | "arb" | "sol";
+
 type Network = {
-  id: "eth" | "base" | "op" | "polygon" | "celo" | "arb";
+  id: NetworkId;
   name: string;
   chainId: number;
   nativeSymbol: string;
@@ -57,9 +60,10 @@ const NETWORKS: Network[] = [
   { id: "eth", name: "Ethereum", chainId: 1, nativeSymbol: "ETH" },
   { id: "base", name: "Base", chainId: 8453, nativeSymbol: "ETH" },
   { id: "op", name: "Optimism", chainId: 10, nativeSymbol: "ETH" },
-  { id: "polygon", name: "Polygon", chainId: 137, nativeSymbol: "MATIC" },
+  { id: "avax", name: "Avalanche", chainId: 43114, nativeSymbol: "AVAX" },
   { id: "celo", name: "Celo", chainId: 42220, nativeSymbol: "CELO" },
   { id: "arb", name: "Arbitrum", chainId: 42161, nativeSymbol: "ETH" },
+  { id: "sol", name: "Solana", chainId: 999, nativeSymbol: "SOL" },
 ];
 
 export default function AccountClient() {
@@ -89,6 +93,7 @@ export default function AccountClient() {
   const [switching, setSwitching] = useState(false);
 
   const [address, setAddress] = useState("");
+  const [solAddress, setSolAddress] = useState("");
   const [email, setEmail] = useState("");
   const [issuer, setIssuer] = useState("");
 
@@ -113,6 +118,8 @@ export default function AccountClient() {
   const brandGradient =
     "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
 
+  const displayAddress = network.id === "sol" ? solAddress : address;
+
   const flashNotice = (msg: string) => {
     setNotice(msg);
     window.setTimeout(() => setNotice(""), 3200);
@@ -126,19 +133,52 @@ export default function AccountClient() {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(address);
+      await navigator.clipboard.writeText(displayAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {}
   };
 
   const loadBalance = async () => {
-    if (!magic || !address) return;
+    if (!magic) return;
 
     setBalLoading(true);
     setBalError("");
 
     try {
+      if (network.id === "sol") {
+        const activeSolAddress =
+          solAddress || (await (magic as any)?.solana?.getPublicAddress?.());
+
+        if (!activeSolAddress) {
+          throw new Error("Solana wallet address not available");
+        }
+
+        setSolAddress(activeSolAddress);
+
+        const connection = new Connection("https://api.mainnet-beta.solana.com");
+        const lamports = await connection.getBalance(
+          new PublicKey(activeSolAddress)
+        );
+        const sol = lamports / LAMPORTS_PER_SOL;
+
+        const priceRes = await fetch(
+          "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+          { cache: "no-store" }
+        );
+        const priceJson = await priceRes.json().catch(() => ({}));
+        const price = Number(priceJson?.solana?.usd ?? 0);
+
+        setNativeAmount(sol);
+        setNativePriceUsd(price || null);
+        setUsdAmount(price ? sol * price : null);
+        return;
+      }
+
+      if (!address) {
+        throw new Error("Wallet address not available");
+      }
+
       await switchEvmChainSafe(magic, network.chainId);
 
       const provider = new ethers.BrowserProvider((magic as any).rpcProvider);
@@ -175,6 +215,11 @@ export default function AccountClient() {
   const openAddressQR = async () => {
     if (!magic || openingWidget) return;
 
+    if (network.id === "sol") {
+      flashNotice("QR widget is currently available on EVM networks.");
+      return;
+    }
+
     setOpeningWidget("receive");
     try {
       await switchEvmChainSafe(magic, network.chainId);
@@ -188,6 +233,11 @@ export default function AccountClient() {
 
   const openSendUI = async () => {
     if (!magic || openingWidget) return;
+
+    if (network.id === "sol") {
+      flashNotice("Send widget is currently available on EVM networks.");
+      return;
+    }
 
     setOpeningWidget("send");
     try {
@@ -203,8 +253,8 @@ export default function AccountClient() {
   const openOnRamp = async () => {
     if (!magic || openingWidget) return;
 
-    if (network.chainId !== 1 && network.chainId !== 137) {
-      flashNotice("Buy Crypto is available on Ethereum and Polygon.");
+    if (network.chainId !== 1) {
+      flashNotice("Buy Crypto is available on Ethereum.");
       return;
     }
 
@@ -276,10 +326,13 @@ export default function AccountClient() {
 
         setPhase("get-address");
 
-        await switchEvmChainSafe(magic, network.chainId);
-
         const evmAddr = await getEvmAddressSafe(magic);
         if (!cancelled) setAddress(evmAddr);
+
+        try {
+          const sAddr = await (magic as any)?.solana?.getPublicAddress?.();
+          if (!cancelled && sAddr) setSolAddress(sAddr);
+        } catch {}
 
         if (cancelled) return;
 
@@ -317,7 +370,8 @@ export default function AccountClient() {
   }, [magic, magicInitError, router, issuer]);
 
   useEffect(() => {
-    if (!magic || !address) return;
+    if (!magic) return;
+    if (network.id !== "sol" && !address) return;
 
     (async () => {
       try {
@@ -329,7 +383,10 @@ export default function AccountClient() {
           window.localStorage.setItem("re_network", network.id);
         }
 
-        await switchEvmChainSafe(magic, network.chainId);
+        if (network.id !== "sol") {
+          await switchEvmChainSafe(magic, network.chainId);
+        }
+
         await loadBalance();
       } catch (e: any) {
         setSyncError(e?.message ?? "Network switch failed");
@@ -338,7 +395,7 @@ export default function AccountClient() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [network.id, address]);
+  }, [network.id, address, solAddress]);
 
   const showLinking = issuer && linkStatus === "linking";
   const showConnected = issuer && linkStatus === "linked";
@@ -601,12 +658,12 @@ export default function AccountClient() {
 
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold">
-              {address ? shortAddr(address) : "—"}
+              {displayAddress ? shortAddr(displayAddress) : "—"}
             </div>
 
             <button
               onClick={handleCopy}
-              disabled={!address}
+              disabled={!displayAddress}
               className="rounded-full border border-[var(--re-border)] bg-white/70 px-4 py-2 text-xs font-semibold hover:bg-white/90 disabled:opacity-60"
             >
               {copied ? "Copied" : "Copy"}
@@ -614,7 +671,9 @@ export default function AccountClient() {
           </div>
 
           <div className="mt-3 text-xs text-[var(--re-muted)]">
-            This is your embedded EVM wallet address.
+            {network.id === "sol"
+              ? "This is your embedded Solana wallet address."
+              : "This is your embedded EVM wallet address."}
           </div>
         </div>
 

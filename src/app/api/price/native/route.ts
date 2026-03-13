@@ -1,44 +1,54 @@
-// src/app/api/price/native/route.ts
-import { NextResponse } from "next/server";
+import { Magic } from "magic-sdk";
+import { EVMExtension } from "@magic-ext/evm";
+import { SolanaExtension } from "@magic-ext/solana";
 
-const COINGECKO_IDS: Record<number, string> = {
-  1: "ethereum",
-  10: "ethereum",
-  137: "matic-network",
-  8453: "ethereum",
-  42220: "celo",
-  42161: "ethereum",
-};
+const magicInstance =
+  typeof window !== "undefined"
+    ? new Magic(process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY || "", {
+        extensions: [
+          new EVMExtension([
+            {
+              rpcUrl: "https://mainnet.base.org",
+              chainId: 8453,
+            },
+            {
+              rpcUrl: "https://mainnet.optimism.io",
+              chainId: 10,
+            },
+            {
+              rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+              chainId: 43114,
+            },
+            {
+              rpcUrl: "https://forno.celo.org",
+              chainId: 42220,
+            },
+            {
+              rpcUrl: "https://arb1.arbitrum.io/rpc",
+              chainId: 42161,
+            },
+          ]),
+          new SolanaExtension({
+            rpcUrl: "https://api.mainnet-beta.solana.com",
+          }),
+        ],
+      })
+    : null;
 
-export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const chainId = Number(searchParams.get("chainId") || "1");
-
-    const id = COINGECKO_IDS[chainId];
-    if (!id) {
-      return NextResponse.json({ error: "Unsupported chain" }, { status: 400 });
-    }
-
-    const r = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
-        id
-      )}&vs_currencies=usd`,
-      {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-      }
-    );
-
-    const j = await r.json().catch(() => ({}));
-    const usd = Number(j?.[id]?.usd ?? 0);
-
-    if (!r.ok || !usd) {
-      return NextResponse.json({ error: "Price unavailable" }, { status: 502 });
-    }
-
-    return NextResponse.json({ usd, chainId });
-  } catch {
-    return NextResponse.json({ error: "Price unavailable" }, { status: 500 });
+export function getMagic() {
+  if (typeof window === "undefined") {
+    throw new Error("Magic must be initialized in the browser");
   }
+
+  if (!process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY) {
+    throw new Error("Missing NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY");
+  }
+
+  if (!magicInstance) {
+    throw new Error("Magic failed to initialize");
+  }
+
+  return magicInstance;
 }
+
+export default getMagic;

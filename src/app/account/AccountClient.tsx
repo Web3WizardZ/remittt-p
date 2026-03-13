@@ -17,6 +17,16 @@ import {
   UserRound,
   RefreshCcw,
   ChevronDown,
+  Landmark,
+  Smartphone,
+  CreditCard,
+  Gift,
+  MessageSquare,
+  Coins,
+  X,
+  CheckCircle2,
+  Clock3,
+  Copy,
 } from "lucide-react";
 
 function shortAddr(addr: string) {
@@ -39,6 +49,21 @@ function formatNative(n: number | null, symbol: string) {
   }).format(Number(n))} ${symbol}`;
 }
 
+function formatTokenText(v?: string | number | null, symbol = "") {
+  const num = Number(v ?? 0);
+  if (!Number.isFinite(num)) return `— ${symbol}`.trim();
+  return `${new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: num >= 1 ? 6 : 8,
+  }).format(num)}${symbol ? ` ${symbol}` : ""}`;
+}
+
+function formatDate(v?: string) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
+}
+
 type Phase =
   | "init"
   | "check-login"
@@ -56,6 +81,63 @@ type Network = {
   nativeSymbol: string;
 };
 
+type SendRailId =
+  | "bank"
+  | "mobile"
+  | "card"
+  | "gift"
+  | "sms"
+  | "cross-chain";
+
+type CrossChainDestination =
+  | "ETHEREUM_MAINNET"
+  | "BASE_MAINNET"
+  | "OPTIMISM_MAINNET"
+  | "ARBITRUM_MAINNET"
+  | "AVALANCHE_MAINNET"
+  | "POLYGON_MAINNET"
+  | "BSC_MAINNET";
+
+type CrossQuote = {
+  ok: true;
+  sourceChain: string;
+  destinationChain: string;
+  token: string;
+  sourceTokenAddress: string;
+  destinationTokenAddress: string;
+  decimals: number;
+  amount: string;
+  amountRaw: string;
+  totalFeesRaw: string;
+  totalFeesFormatted: string;
+  bridge: "ACROSS" | "CCTP" | "GATEWAY" | "RHINOFI" | null;
+  supportedBridges: string[];
+  bridgeAddress: string;
+  bridgeExtraData: string;
+};
+
+type CrossIntent = {
+  ok: true;
+  id: number;
+  intentAddress: string;
+  destinationIntentAddress: string;
+  sourceChain: string;
+  destinationChain: string;
+  token: string;
+  tokenDecimals: number;
+  fundingAmountRaw: string;
+  fundingAmountFormatted: string;
+  feesRaw: string;
+  feesFormatted: string;
+  status: string;
+  recipient: string;
+  refundAddress: string;
+  expiresAt: string;
+  txHash: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const NETWORKS: Network[] = [
   { id: "eth", name: "Ethereum", chainId: 1, nativeSymbol: "ETH" },
   { id: "base", name: "Base", chainId: 8453, nativeSymbol: "ETH" },
@@ -64,6 +146,70 @@ const NETWORKS: Network[] = [
   { id: "celo", name: "Celo", chainId: 42220, nativeSymbol: "CELO" },
   { id: "arb", name: "Arbitrum", chainId: 42161, nativeSymbol: "ETH" },
   { id: "sol", name: "Solana", chainId: 999, nativeSymbol: "SOL" },
+];
+
+const SEND_RAILS: Array<{
+  id: SendRailId;
+  title: string;
+  subtitle: string;
+  icon: any;
+  enabled: boolean;
+}> = [
+  {
+    id: "bank",
+    title: "Bank",
+    subtitle: "Coming soon",
+    icon: Landmark,
+    enabled: false,
+  },
+  {
+    id: "mobile",
+    title: "Mobile money",
+    subtitle: "Coming soon",
+    icon: Smartphone,
+    enabled: false,
+  },
+  {
+    id: "card",
+    title: "Debit Card",
+    subtitle: "Coming soon",
+    icon: CreditCard,
+    enabled: false,
+  },
+  {
+    id: "gift",
+    title: "Gift Card",
+    subtitle: "Coming soon",
+    icon: Gift,
+    enabled: false,
+  },
+  {
+    id: "sms",
+    title: "SMS",
+    subtitle: "Coming soon",
+    icon: MessageSquare,
+    enabled: false,
+  },
+  {
+    id: "cross-chain",
+    title: "Crypto Cross Chain",
+    subtitle: "Live now",
+    icon: Coins,
+    enabled: true,
+  },
+];
+
+const DESTINATION_CHAINS: Array<{
+  value: CrossChainDestination;
+  label: string;
+}> = [
+  { value: "ETHEREUM_MAINNET", label: "Ethereum" },
+  { value: "BASE_MAINNET", label: "Base" },
+  { value: "OPTIMISM_MAINNET", label: "Optimism" },
+  { value: "ARBITRUM_MAINNET", label: "Arbitrum" },
+  { value: "AVALANCHE_MAINNET", label: "Avalanche" },
+  { value: "POLYGON_MAINNET", label: "Polygon" },
+  { value: "BSC_MAINNET", label: "BNB Chain" },
 ];
 
 export default function AccountClient() {
@@ -114,13 +260,27 @@ export default function AccountClient() {
   const [nativePriceUsd, setNativePriceUsd] = useState<number | null>(null);
 
   const [openingWidget, setOpeningWidget] = useState<
-    null | "send" | "receive" | "deposit"
+    null | "receive" | "deposit"
   >(null);
+
+  const [sendMenuOpen, setSendMenuOpen] = useState(false);
+  const [crossChainOpen, setCrossChainOpen] = useState(false);
+  const [crossAmount, setCrossAmount] = useState("");
+  const [crossRecipient, setCrossRecipient] = useState("");
+  const [crossDestination, setCrossDestination] =
+    useState<CrossChainDestination>("ARBITRUM_MAINNET");
+  const [crossLoading, setCrossLoading] = useState(false);
+  const [crossError, setCrossError] = useState("");
+  const [crossQuote, setCrossQuote] = useState<CrossQuote | null>(null);
+  const [crossIntent, setCrossIntent] = useState<CrossIntent | null>(null);
 
   const brandGradient =
     "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
 
   const displayAddress = network.id === "sol" ? solAddress : address;
+  const crossChainSupportedSource = ["eth", "base", "op", "avax", "arb"].includes(
+    network.id
+  );
 
   const flashNotice = (msg: string) => {
     setNotice(msg);
@@ -140,6 +300,44 @@ export default function AccountClient() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {}
+  };
+
+  const copyText = async (value: string, message = "Copied") => {
+    try {
+      await navigator.clipboard.writeText(value);
+      flashNotice(message);
+    } catch {}
+  };
+
+  const resetCrossChainState = () => {
+    setCrossError("");
+    setCrossQuote(null);
+    setCrossIntent(null);
+  };
+
+  const openSendMenu = () => {
+    setSendMenuOpen(true);
+  };
+
+  const openCrossChainRail = () => {
+    setSendMenuOpen(false);
+
+    if (!crossChainSupportedSource) {
+      flashNotice("Crypto Cross Chain is currently available on supported EVM networks.");
+      return;
+    }
+
+    if (!address) {
+      flashNotice("Wallet address not available yet.");
+      return;
+    }
+
+    if (!crossRecipient) {
+      setCrossRecipient(address);
+    }
+
+    resetCrossChainState();
+    setCrossChainOpen(true);
   };
 
   const loadBalance = async () => {
@@ -247,26 +445,6 @@ export default function AccountClient() {
     }
   };
 
-  const openSendUI = async () => {
-    if (!magic || openingWidget) return;
-
-    if (network.id === "sol") {
-      flashNotice("Send widget is currently available on EVM networks.");
-      return;
-    }
-
-    setOpeningWidget("send");
-
-    try {
-      await switchEvmChainSafe(magic, network.chainId);
-      await (magic as any).wallet?.showSendTokensUI?.();
-    } catch (e: any) {
-      flashNotice(e?.message ?? "Could not open Send");
-    } finally {
-      setOpeningWidget(null);
-    }
-  };
-
   const openOnRamp = async () => {
     if (!magic || openingWidget) return;
 
@@ -292,6 +470,138 @@ export default function AccountClient() {
       }
     } finally {
       setOpeningWidget(null);
+    }
+  };
+
+  const requestCrossChainQuote = async () => {
+    try {
+      if (!crossChainSupportedSource) {
+        throw new Error("Switch to Ethereum, Base, Optimism, Arbitrum or Avalanche.");
+      }
+
+      if (!crossAmount || Number(crossAmount) <= 0) {
+        throw new Error("Enter a valid USDC amount.");
+      }
+
+      if (!crossRecipient || !ethers.isAddress(crossRecipient)) {
+        throw new Error("Enter a valid recipient address.");
+      }
+
+      setCrossLoading(true);
+      setCrossError("");
+      setCrossQuote(null);
+      setCrossIntent(null);
+
+      const res = await fetch("/api/chainrails/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceNetworkId: network.id,
+          destinationChain: crossDestination,
+          amount: crossAmount,
+          recipient: crossRecipient,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Failed to fetch quote");
+      }
+
+      setCrossQuote(json);
+    } catch (e: any) {
+      setCrossError(e?.message ?? "Could not fetch quote");
+    } finally {
+      setCrossLoading(false);
+    }
+  };
+
+  const createCrossChainIntent = async () => {
+    try {
+      if (!address) {
+        throw new Error("Wallet address not available.");
+      }
+
+      if (!crossQuote) {
+        throw new Error("Get a quote first.");
+      }
+
+      setCrossLoading(true);
+      setCrossError("");
+
+      const res = await fetch("/api/chainrails/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceNetworkId: network.id,
+          destinationChain: crossDestination,
+          amount: crossAmount,
+          sender: address,
+          recipient: crossRecipient,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Failed to create intent");
+      }
+
+      setCrossIntent(json);
+      flashNotice("Cross-chain intent created.");
+    } catch (e: any) {
+      setCrossError(e?.message ?? "Could not create intent");
+    } finally {
+      setCrossLoading(false);
+    }
+  };
+
+  const refreshCrossChainIntent = async () => {
+    try {
+      if (!crossIntent?.intentAddress) return;
+
+      setCrossLoading(true);
+      setCrossError("");
+
+      const res = await fetch(
+        `/api/chainrails/intent-status?address=${encodeURIComponent(
+          crossIntent.intentAddress
+        )}`,
+        { cache: "no-store" }
+      );
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Failed to refresh intent");
+      }
+
+      setCrossIntent(json);
+      flashNotice("Intent status refreshed.");
+    } catch (e: any) {
+      setCrossError(e?.message ?? "Could not refresh intent");
+    } finally {
+      setCrossLoading(false);
+    }
+  };
+
+  const openWalletForFunding = async () => {
+    try {
+      if (!magic) return;
+      if (!crossIntent?.intentAddress) {
+        throw new Error("Create an intent first.");
+      }
+
+      await copyText(
+        crossIntent.intentAddress,
+        "Intent address copied. Opened wallet send."
+      );
+
+      await switchEvmChainSafe(magic, network.chainId);
+      await (magic as any).wallet?.showSendTokensUI?.();
+    } catch (e: any) {
+      flashNotice(e?.message ?? "Could not open wallet send");
     }
   };
 
@@ -379,6 +689,10 @@ export default function AccountClient() {
           }).catch(() => {});
         }
 
+        if (!cancelled && evmAddr && !crossRecipient) {
+          setCrossRecipient(evmAddr);
+        }
+
         setPhase("done");
       } catch (e: any) {
         if (!cancelled) {
@@ -394,7 +708,7 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [magic, magicInitError, router]);
+  }, [magic, magicInitError, router, crossRecipient]);
 
   useEffect(() => {
     if (!magic) return;
@@ -445,12 +759,12 @@ export default function AccountClient() {
       phase === "check-login"
         ? "Just a moment while we verify you."
         : phase === "get-info"
-          ? "Fetching your profile details."
-          : phase === "validate"
-            ? "Confirming your secure session."
-            : phase === "get-address"
-              ? "Preparing your embedded wallet."
-              : "Almost there.";
+        ? "Fetching your profile details."
+        : phase === "validate"
+        ? "Confirming your secure session."
+        : phase === "get-address"
+        ? "Preparing your embedded wallet."
+        : "Almost there.";
 
     return (
       <main className="relative min-h-screen">
@@ -561,7 +875,10 @@ export default function AccountClient() {
                 value={network.id}
                 onChange={(e) => {
                   const next = NETWORKS.find((n) => n.id === e.target.value);
-                  if (next) setNetwork(next);
+                  if (next) {
+                    setNetwork(next);
+                    resetCrossChainState();
+                  }
                 }}
                 className="appearance-none rounded-xl border border-[var(--re-border)] bg-white/80 px-3 py-2 pr-9 text-sm font-semibold"
                 disabled={switching}
@@ -583,10 +900,10 @@ export default function AccountClient() {
               {syncError
                 ? "Sync issue — some features may be limited."
                 : showConnFailed
-                  ? "Connection issue — refresh."
-                  : showLinking
-                    ? "Connecting…"
-                    : "Connected"}
+                ? "Connection issue — refresh."
+                : showLinking
+                ? "Connecting…"
+                : "Connected"}
             </div>
 
             {syncError || showConnFailed ? (
@@ -656,13 +973,15 @@ export default function AccountClient() {
 
         <div className="mt-4 grid grid-cols-3 gap-3">
           <button
-            onClick={openSendUI}
-            disabled={!!openingWidget || switching}
+            onClick={openSendMenu}
+            disabled={switching}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <ArrowUpRight className="mx-auto h-5 w-5" />
             <div className="mt-2 text-sm font-semibold">Send</div>
-            <div className="mt-1 text-xs text-[var(--re-muted)]">Transfer</div>
+            <div className="mt-1 text-xs text-[var(--re-muted)]">
+              Choose rail
+            </div>
           </button>
 
           <button
@@ -716,6 +1035,333 @@ export default function AccountClient() {
           </Link>
         </div>
       </div>
+
+      {sendMenuOpen ? (
+        <div className="fixed inset-0 z-40 bg-black/45 p-4">
+          <div
+            className="absolute inset-0"
+            onClick={() => setSendMenuOpen(false)}
+          />
+          <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-3xl border border-[var(--re-border)] bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <div className="text-lg font-semibold">Send money</div>
+                <div className="text-sm text-[var(--re-muted)]">
+                  Choose how you want to send
+                </div>
+              </div>
+              <button
+                onClick={() => setSendMenuOpen(false)}
+                className="rounded-full border border-[var(--re-border)] p-2"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {SEND_RAILS.map((rail) => {
+                const Icon = rail.icon;
+                const isCrossChain = rail.id === "cross-chain";
+                const disabled = !rail.enabled || (isCrossChain && !crossChainSupportedSource);
+
+                return (
+                  <button
+                    key={rail.id}
+                    onClick={() => {
+                      if (isCrossChain && !disabled) openCrossChainRail();
+                    }}
+                    disabled={disabled}
+                    className="rounded-2xl border border-[var(--re-border)] bg-[var(--re-card)] p-4 text-left disabled:opacity-60"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="rounded-2xl bg-white/80 p-2 ring-1 ring-black/5">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          rail.enabled && !(isCrossChain && !crossChainSupportedSource)
+                            ? "bg-green-100 text-green-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {rail.enabled && !(isCrossChain && !crossChainSupportedSource)
+                          ? "Live"
+                          : "Soon"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 text-sm font-semibold">{rail.title}</div>
+                    <div className="mt-1 text-xs text-[var(--re-muted)]">
+                      {isCrossChain && !crossChainSupportedSource
+                        ? "Switch to a supported EVM network"
+                        : rail.subtitle}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {crossChainOpen ? (
+        <div className="fixed inset-0 z-50 bg-black/50 p-4">
+          <div
+            className="absolute inset-0"
+            onClick={() => setCrossChainOpen(false)}
+          />
+          <div className="relative mx-auto mt-8 max-h-[88vh] w-full max-w-md overflow-y-auto rounded-3xl border border-[var(--re-border)] bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg font-semibold">Crypto Cross Chain</div>
+                <div className="text-sm text-[var(--re-muted)]">
+                  Send USDC across supported chains
+                </div>
+              </div>
+              <button
+                onClick={() => setCrossChainOpen(false)}
+                className="rounded-full border border-[var(--re-border)] p-2"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-[var(--re-border)] bg-[var(--re-card)] p-4">
+              <div className="text-xs text-[var(--re-muted)]">From</div>
+              <div className="mt-1 text-sm font-semibold">{network.name}</div>
+              <div className="mt-3 text-xs text-[var(--re-muted)]">To</div>
+              <div className="relative mt-1">
+                <select
+                  value={crossDestination}
+                  onChange={(e) => {
+                    setCrossDestination(e.target.value as CrossChainDestination);
+                    setCrossQuote(null);
+                    setCrossIntent(null);
+                  }}
+                  className="w-full appearance-none rounded-xl border border-[var(--re-border)] bg-white px-3 py-3 pr-9 text-sm font-semibold"
+                >
+                  {DESTINATION_CHAINS.map((chain) => (
+                    <option key={chain.value} value={chain.value}>
+                      {chain.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--re-muted)]" />
+              </div>
+
+              <div className="mt-4 grid grid-cols-[1fr_auto] gap-3">
+                <div>
+                  <label className="text-xs text-[var(--re-muted)]">
+                    Amount
+                  </label>
+                  <input
+                    inputMode="decimal"
+                    value={crossAmount}
+                    onChange={(e) => {
+                      setCrossAmount(e.target.value);
+                      setCrossQuote(null);
+                      setCrossIntent(null);
+                    }}
+                    placeholder="100"
+                    className="mt-1 w-full rounded-xl border border-[var(--re-border)] bg-white px-3 py-3 text-sm font-semibold outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-[var(--re-muted)]">
+                    Token
+                  </label>
+                  <div className="mt-1 rounded-xl border border-[var(--re-border)] bg-slate-50 px-4 py-3 text-sm font-semibold">
+                    USDC
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <label className="text-xs text-[var(--re-muted)]">
+                  Recipient address
+                </label>
+                <input
+                  value={crossRecipient}
+                  onChange={(e) => {
+                    setCrossRecipient(e.target.value);
+                    setCrossQuote(null);
+                    setCrossIntent(null);
+                  }}
+                  placeholder="0x..."
+                  className="mt-1 w-full rounded-xl border border-[var(--re-border)] bg-white px-3 py-3 text-sm outline-none"
+                />
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <button
+                  onClick={requestCrossChainQuote}
+                  disabled={crossLoading}
+                  className="rounded-2xl px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: brandGradient }}
+                >
+                  {crossLoading ? "Loading…" : "Get quote"}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setCrossAmount("");
+                    setCrossRecipient(address || "");
+                    resetCrossChainState();
+                  }}
+                  className="rounded-2xl border border-[var(--re-border)] bg-white px-4 py-3 text-sm font-semibold"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            {crossError ? (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {crossError}
+              </div>
+            ) : null}
+
+            {crossQuote ? (
+              <div className="mt-4 rounded-2xl border border-[var(--re-border)] bg-[var(--re-card)] p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  Best route found
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="text-xs text-[var(--re-muted)]">Bridge</div>
+                    <div className="mt-1 font-semibold">
+                      {crossQuote.bridge ?? "Direct"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="text-xs text-[var(--re-muted)]">Estimated fee</div>
+                    <div className="mt-1 font-semibold">
+                      {formatTokenText(crossQuote.totalFeesFormatted, "USDC")}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-2xl bg-white p-3 text-xs text-[var(--re-muted)]">
+                  Supported bridges:{" "}
+                  <span className="font-semibold text-[var(--re-text)]">
+                    {crossQuote.supportedBridges?.join(", ") || "—"}
+                  </span>
+                </div>
+
+                <button
+                  onClick={createCrossChainIntent}
+                  disabled={crossLoading}
+                  className="mt-4 w-full rounded-2xl px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: brandGradient }}
+                >
+                  {crossLoading ? "Creating…" : "Create funding intent"}
+                </button>
+              </div>
+            ) : null}
+
+            {crossIntent ? (
+              <div className="mt-4 rounded-2xl border border-[var(--re-border)] bg-[var(--re-card)] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Intent created</div>
+                    <div className="mt-1 text-xs text-[var(--re-muted)]">
+                      Fund this intent to start the cross-chain transfer
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700">
+                    {crossIntent.status}
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="text-xs text-[var(--re-muted)]">Fund exactly</div>
+                    <div className="mt-1 font-semibold">
+                      {formatTokenText(crossIntent.fundingAmountFormatted, crossIntent.token)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs text-[var(--re-muted)]">
+                          Intent address
+                        </div>
+                        <div className="mt-1 font-semibold break-all">
+                          {crossIntent.intentAddress}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() =>
+                          copyText(crossIntent.intentAddress, "Intent address copied.")
+                        }
+                        className="shrink-0 rounded-full border border-[var(--re-border)] p-2"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-white p-3">
+                      <div className="text-xs text-[var(--re-muted)]">Route</div>
+                      <div className="mt-1 font-semibold">
+                        {crossIntent.sourceChain.replace("_MAINNET", "")} →{" "}
+                        {crossIntent.destinationChain.replace("_MAINNET", "")}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-3">
+                      <div className="text-xs text-[var(--re-muted)]">
+                        Estimated fee
+                      </div>
+                      <div className="mt-1 font-semibold">
+                        {formatTokenText(crossIntent.feesFormatted, crossIntent.token)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="flex items-center gap-2 text-xs text-[var(--re-muted)]">
+                      <Clock3 className="h-4 w-4" />
+                      Expires
+                    </div>
+                    <div className="mt-1 font-semibold">
+                      {formatDate(crossIntent.expiresAt)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button
+                    onClick={openWalletForFunding}
+                    className="rounded-2xl px-4 py-3 text-sm font-semibold text-white"
+                    style={{ background: brandGradient }}
+                  >
+                    Open wallet send
+                  </button>
+
+                  <button
+                    onClick={refreshCrossChainIntent}
+                    disabled={crossLoading}
+                    className="rounded-2xl border border-[var(--re-border)] bg-white px-4 py-3 text-sm font-semibold disabled:opacity-60"
+                  >
+                    Refresh status
+                  </button>
+                </div>
+
+                <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/80 px-3 py-2 text-xs text-[var(--re-muted)]">
+                  Wallet send opens your Magic transfer UI. The intent address is already copied so you can fund it directly.
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

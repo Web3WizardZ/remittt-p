@@ -12,6 +12,7 @@
     "@magic-ext/evm": "^1.4.1",
     "@magic-ext/solana": "^30.4.0",
     "@magic-sdk/admin": "^2.8.2",
+    "@onramp.money/onramp-web-sdk": "^2.0.1",
     "@radix-ui/react-dialog": "^1.1.14",
     "@solana/web3.js": "^1.98.4",
     "bufferutil": "^4.1.0",

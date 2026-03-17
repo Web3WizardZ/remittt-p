@@ -4,7 +4,7 @@
 import AnimatedBackground from "@/components/animated-background";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMagic, solanaRpcUrl } from "@/lib/magic";
 import { getEvmAddressSafe, switchEvmChainSafe } from "@/lib/magicSession";
@@ -136,6 +136,33 @@ type CrossIntent = {
   txHash: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type OnrampTxData = {
+  actualCryptoAmount?: number | string;
+  actualPrice?: number | string;
+  chainId?: number | string;
+  clientFee?: number | string;
+  coinId?: number | string;
+  createdAt?: string;
+  expectedCryptoAmount?: number | string;
+  expectedPrice?: number | string;
+  fiatAmount?: number | string;
+  fiatType?: number | string;
+  gasFee?: number | string;
+  gatewayFee?: number | string;
+  kycNeeded?: number | string;
+  merchantRecognitionId?: string | null;
+  onRampFee?: number | string;
+  orderId?: number | string;
+  orderStatus?: number | string;
+  paymentMethod?: string;
+  referenceId?: string;
+  transactionHash?: string;
+  updatedAt?: string;
+  walletAddress?: string;
+  cryptoAmount?: number | string;
+  coinRate?: number | string;
 };
 
 const NETWORKS: Network[] = [
@@ -274,6 +301,12 @@ export default function AccountClient() {
   const [crossQuote, setCrossQuote] = useState<CrossQuote | null>(null);
   const [crossIntent, setCrossIntent] = useState<CrossIntent | null>(null);
 
+  const [onrampStage, setOnrampStage] = useState("");
+  const [onrampError, setOnrampError] = useState("");
+  const [onrampTx, setOnrampTx] = useState<OnrampTxData | null>(null);
+
+  const onrampInstanceRef = useRef<any | null>(null);
+
   const brandGradient =
     "linear-gradient(135deg, #4f46e5 0%, #a855f7 45%, #ec4899 100%)";
 
@@ -281,6 +314,11 @@ export default function AccountClient() {
   const crossChainSupportedSource = ["eth", "base", "op", "avax", "arb"].includes(
     network.id
   );
+  const onrampSupported = network.id !== "sol";
+  const onrampAppId = Number(process.env.NEXT_PUBLIC_ONRAMP_APP_ID || 0);
+  const onrampSandbox =
+    String(process.env.NEXT_PUBLIC_ONRAMP_SANDBOX || "").toLowerCase() ===
+    "true";
 
   const flashNotice = (msg: string) => {
     setNotice(msg);
@@ -289,6 +327,9 @@ export default function AccountClient() {
 
   const handleLogout = async () => {
     if (!magic) return;
+    try {
+      onrampInstanceRef.current?.close?.();
+    } catch {}
     await magic.user.logout();
     router.replace("/auth");
   };
@@ -446,28 +487,133 @@ export default function AccountClient() {
   };
 
   const openOnRamp = async () => {
-    if (!magic || openingWidget) return;
+    if (openingWidget) return;
 
-    if (network.chainId !== 1) {
-      flashNotice("Buy Crypto is available on Ethereum.");
+    if (!onrampSupported) {
+      flashNotice("Deposit is currently available on EVM networks.");
+      return;
+    }
+
+    if (!address) {
+      flashNotice("Wallet address not available yet.");
+      return;
+    }
+
+    if (!onrampAppId) {
+      flashNotice("Missing NEXT_PUBLIC_ONRAMP_APP_ID.");
       return;
     }
 
     setOpeningWidget("deposit");
+    setOnrampError("");
+    setOnrampStage("Opening deposit widget…");
 
     try {
-      await switchEvmChainSafe(magic, network.chainId);
-      await (magic as any).wallet?.showOnRamp?.();
-    } catch (e: any) {
       try {
-        await (magic as any).wallet?.showUI?.();
-        flashNotice("Buy Crypto is not enabled yet — opened Wallet instead.");
-      } catch {
-        flashNotice(
-          e?.message ??
-            "Buy Crypto is unavailable. Enable Widget UI + On-ramp in Magic dashboard."
-        );
+        onrampInstanceRef.current?.close?.();
+      } catch {}
+
+      onrampInstanceRef.current = null;
+
+      const sdkModule = await import("@onramp.money/onramp-web-sdk");
+      const OnrampWebSDK = (sdkModule as any)?.OnrampWebSDK;
+
+      if (!OnrampWebSDK) {
+        throw new Error("Onramp SDK failed to load.");
       }
+
+      const instance = new OnrampWebSDK({
+        appId: onrampAppId,
+        walletAddress: address,
+        flowType: 1,
+        coinCode: "USDT",
+        isRestricted: false,
+        lang: "en",
+        sandbox: onrampSandbox,
+        redirectUrl:
+          typeof window !== "undefined"
+            ? `${window.location.origin}/account`
+            : undefined,
+        theme: {
+          lightMode: {
+            baseColor: "#6d28d9",
+            inputRadius: "16px",
+            buttonRadius: "16px",
+          },
+          darkMode: {
+            baseColor: "#8b5cf6",
+            inputRadius: "16px",
+            buttonRadius: "16px",
+          },
+          defaultMode: "lightMode",
+        },
+      });
+
+      instance.on("WIDGET_EVENTS", (e: any) => {
+        const eventType = String(e?.type || "");
+
+        if (eventType === "ONRAMP_WIDGET_READY") {
+          setOnrampStage("Deposit widget ready");
+        } else if (eventType === "ONRAMP_WIDGET_CLOSE_REQUEST_CONFIRMED") {
+          setOnrampStage("Deposit widget closed");
+          setOpeningWidget(null);
+          onrampInstanceRef.current = null;
+          void loadBalance();
+        } else if (eventType === "ONRAMP_WIDGET_FAILED") {
+          const msg =
+            e?.data?.message ||
+            e?.data?.error ||
+            "Deposit widget failed to load.";
+          setOnrampError(String(msg));
+          setOnrampStage("");
+          setOpeningWidget(null);
+          onrampInstanceRef.current = null;
+        } else if (eventType === "ONRAMP_WIDGET_CONTENT_COPIED") {
+          flashNotice("Copied from deposit widget.");
+        }
+      });
+
+      instance.on("TX_EVENTS", (e: any) => {
+        const eventType = String(e?.type || "");
+        const data = (e?.data || {}) as OnrampTxData;
+
+        if (eventType === "ONRAMP_WIDGET_TX_INIT") {
+          setOnrampStage("Payment details ready");
+          setOnrampTx(data);
+        } else if (eventType === "ONRAMP_WIDGET_TX_FINDING") {
+          setOnrampStage("Finding your deposit…");
+          setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
+        } else if (eventType === "ONRAMP_WIDGET_TX_PURCHASING") {
+          setOnrampStage("Purchasing crypto…");
+          setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
+        } else if (eventType === "ONRAMP_WIDGET_TX_SENDING") {
+          setOnrampStage("Sending crypto to your wallet…");
+          setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
+        } else if (eventType === "ONRAMP_WIDGET_TX_COMPLETED") {
+          setOnrampStage("Deposit completed");
+          setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
+          flashNotice("Deposit completed.");
+          void loadBalance();
+        } else if (
+          eventType === "ONRAMP_WIDGET_TX_FINDING_FAILED" ||
+          eventType === "ONRAMP_WIDGET_TX_PURCHASING_FAILED" ||
+          eventType === "ONRAMP_WIDGET_TX_SENDING_FAILED"
+        ) {
+          const msg =
+            e?.data?.message ||
+            e?.data?.error ||
+            "Deposit failed during processing.";
+          setOnrampError(String(msg));
+          setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
+        }
+      });
+
+      onrampInstanceRef.current = instance;
+      instance.show();
+    } catch (e: any) {
+      setOnrampError(e?.message ?? "Could not open deposit widget.");
+      setOnrampStage("");
+      onrampInstanceRef.current = null;
     } finally {
       setOpeningWidget(null);
     }
@@ -739,6 +885,15 @@ export default function AccountClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [network.id, address, solAddress]);
 
+  useEffect(() => {
+    return () => {
+      try {
+        onrampInstanceRef.current?.close?.();
+      } catch {}
+      onrampInstanceRef.current = null;
+    };
+  }, []);
+
   const showLinking = issuer && linkStatus === "linking";
   const showConnected = issuer && linkStatus === "linked";
   const showConnFailed = issuer && linkStatus === "failed";
@@ -878,6 +1033,8 @@ export default function AccountClient() {
                   if (next) {
                     setNetwork(next);
                     resetCrossChainState();
+                    setOnrampError("");
+                    setOnrampStage("");
                   }
                 }}
                 className="appearance-none rounded-xl border border-[var(--re-border)] bg-white/80 px-3 py-2 pr-9 text-sm font-semibold"
@@ -927,6 +1084,18 @@ export default function AccountClient() {
         {notice ? (
           <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-2 text-xs text-[var(--re-muted)]">
             {notice}
+          </div>
+        ) : null}
+
+        {onrampStage ? (
+          <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-2 text-xs text-[var(--re-muted)]">
+            Deposit status: <span className="font-semibold text-[var(--re-text)]">{onrampStage}</span>
+          </div>
+        ) : null}
+
+        {onrampError ? (
+          <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {onrampError}
           </div>
         ) : null}
 
@@ -996,12 +1165,14 @@ export default function AccountClient() {
 
           <button
             onClick={openOnRamp}
-            disabled={!!openingWidget || switching}
+            disabled={!!openingWidget || switching || !onrampSupported}
             className="rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-4 text-center hover:bg-white/90 disabled:opacity-60"
           >
             <Plus className="mx-auto h-5 w-5" />
             <div className="mt-2 text-sm font-semibold">Deposit</div>
-            <div className="mt-1 text-xs text-[var(--re-muted)]">Buy crypto</div>
+            <div className="mt-1 text-xs text-[var(--re-muted)]">
+              {onrampSupported ? "Buy crypto" : "EVM only"}
+            </div>
           </button>
         </div>
 
@@ -1028,6 +1199,112 @@ export default function AccountClient() {
               : "This is your embedded EVM wallet address."}
           </div>
         </div>
+
+        {onrampTx ? (
+          <div className="mt-4 rounded-3xl border border-[var(--re-border)] bg-[var(--re-card)] p-5">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <div className="text-sm font-semibold">Latest deposit activity</div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-2xl bg-white p-3">
+                <div className="text-xs text-[var(--re-muted)]">Fiat amount</div>
+                <div className="mt-1 font-semibold">
+                  {onrampTx.fiatAmount ?? "—"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-white p-3">
+                <div className="text-xs text-[var(--re-muted)]">Expected crypto</div>
+                <div className="mt-1 font-semibold">
+                  {onrampTx.expectedCryptoAmount ?? onrampTx.cryptoAmount ?? "—"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-white p-3">
+                <div className="text-xs text-[var(--re-muted)]">Actual crypto</div>
+                <div className="mt-1 font-semibold">
+                  {onrampTx.actualCryptoAmount ?? "—"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-white p-3">
+                <div className="text-xs text-[var(--re-muted)]">Gas fee</div>
+                <div className="mt-1 font-semibold">
+                  {onrampTx.gasFee ?? "—"}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              {onrampTx.referenceId ? (
+                <div className="rounded-2xl bg-white p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs text-[var(--re-muted)]">
+                        Reference ID
+                      </div>
+                      <div className="mt-1 break-all font-semibold">
+                        {onrampTx.referenceId}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() =>
+                        copyText(onrampTx.referenceId || "", "Reference ID copied.")
+                      }
+                      className="shrink-0 rounded-full border border-[var(--re-border)] p-2"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {onrampTx.transactionHash ? (
+                <div className="rounded-2xl bg-white p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs text-[var(--re-muted)]">
+                        Transaction hash
+                      </div>
+                      <div className="mt-1 break-all font-semibold">
+                        {onrampTx.transactionHash}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() =>
+                        copyText(
+                          onrampTx.transactionHash || "",
+                          "Transaction hash copied."
+                        )
+                      }
+                      className="shrink-0 rounded-full border border-[var(--re-border)] p-2"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-white p-3">
+                  <div className="text-xs text-[var(--re-muted)]">Order ID</div>
+                  <div className="mt-1 font-semibold">
+                    {onrampTx.orderId ?? "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-white p-3">
+                  <div className="text-xs text-[var(--re-muted)]">Updated</div>
+                  <div className="mt-1 font-semibold">
+                    {formatDate(onrampTx.updatedAt || onrampTx.createdAt)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-6 text-center text-xs text-[var(--re-muted)]">
           <Link href="/" className="font-semibold text-[var(--re-primary)]">

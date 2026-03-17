@@ -64,6 +64,32 @@ function formatDate(v?: string) {
   return d.toLocaleString();
 }
 
+function getOnrampOrderStatusLabel(status?: number | string) {
+  const code = Number(status);
+  if (Number.isNaN(code)) return "—";
+
+  const map: Record<number, string> = {
+    [-4]: "Amount mismatch",
+    [-3]: "Bank and KYC name mismatch",
+    [-2]: "Transaction abandoned",
+    [-1]: "Transaction timed out",
+    0: "Transaction created",
+    1: "Reference ID claimed",
+    2: "Deposit secured",
+    3: "Crypto purchased",
+    4: "Withdrawal complete",
+    5: "Webhook sent",
+    11: "Order placement initiated",
+    12: "Purchasing crypto",
+    13: "Crypto purchased",
+    14: "Withdrawal initiated",
+    15: "Withdrawal complete",
+    16: "Webhook sent",
+  };
+
+  return map[code] ?? `Status ${code}`;
+}
+
 type Phase =
   | "init"
   | "check-login"
@@ -522,12 +548,26 @@ export default function AccountClient() {
         throw new Error("Onramp SDK failed to load.");
       }
 
+      const networkMap: Record<Exclude<NetworkId, "sol">, string> = {
+        eth: "ethereum",
+        base: "base",
+        op: "optimism",
+        avax: "avalanche",
+        celo: "celo",
+        arb: "arbitrum",
+      };
+
+      const preferredNetwork =
+        network.id === "sol" ? "polygon" : networkMap[network.id];
+
       const instance = new OnrampWebSDK({
         appId: onrampAppId,
         walletAddress: address,
         flowType: 1,
         coinCode: "USDT",
-        isRestricted: false,
+        network: preferredNetwork,
+        fiatType: 17,
+        fiatAmount: 100,
         lang: "en",
         sandbox: onrampSandbox,
         redirectUrl:
@@ -545,7 +585,7 @@ export default function AccountClient() {
             inputRadius: "16px",
             buttonRadius: "16px",
           },
-          defaultMode: "lightMode",
+          default: "lightMode",
         },
       });
 
@@ -554,6 +594,10 @@ export default function AccountClient() {
 
         if (eventType === "ONRAMP_WIDGET_READY") {
           setOnrampStage("Deposit widget ready");
+        } else if (eventType === "ONRAMP_WIDGET_LOGIN_SUCCESS") {
+          setOnrampStage("Signed in to deposit flow");
+        } else if (eventType === "ONRAMP_WIDGET_NAVIGATION") {
+          setOnrampStage("Deposit flow updated");
         } else if (eventType === "ONRAMP_WIDGET_CLOSE_REQUEST_CONFIRMED") {
           setOnrampStage("Deposit widget closed");
           setOpeningWidget(null);
@@ -573,6 +617,24 @@ export default function AccountClient() {
         }
       });
 
+      instance.on("KYC_EVENTS", (e: any) => {
+        const eventType = String(e?.type || "");
+
+        if (eventType === "ONRAMP_KYC_READY") {
+          setOnrampStage("KYC ready");
+        } else if (eventType === "ONRAMP_KYC_PENDING") {
+          setOnrampStage("KYC pending review");
+        } else if (eventType === "ONRAMP_KYC_REJECTED") {
+          setOnrampError("KYC was rejected. Please review your submitted details.");
+        } else if (eventType === "ONRAMP_KYC_ERROR") {
+          const msg =
+            e?.data?.message || e?.data?.error || "KYC failed to load.";
+          setOnrampError(String(msg));
+        } else if (eventType === "ONRAMP_KYC_CLOSE") {
+          setOnrampStage("KYC flow closed");
+        }
+      });
+
       instance.on("TX_EVENTS", (e: any) => {
         const eventType = String(e?.type || "");
         const data = (e?.data || {}) as OnrampTxData;
@@ -589,21 +651,16 @@ export default function AccountClient() {
         } else if (eventType === "ONRAMP_WIDGET_TX_SENDING") {
           setOnrampStage("Sending crypto to your wallet…");
           setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
+        } else if (eventType === "ONRAMP_WIDGET_TX_SENT") {
+          setOnrampStage("Crypto sent onchain");
+          setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
         } else if (eventType === "ONRAMP_WIDGET_TX_COMPLETED") {
           setOnrampStage("Deposit completed");
           setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
           flashNotice("Deposit completed.");
           void loadBalance();
-        } else if (
-          eventType === "ONRAMP_WIDGET_TX_FINDING_FAILED" ||
-          eventType === "ONRAMP_WIDGET_TX_PURCHASING_FAILED" ||
-          eventType === "ONRAMP_WIDGET_TX_SENDING_FAILED"
-        ) {
-          const msg =
-            e?.data?.message ||
-            e?.data?.error ||
-            "Deposit failed during processing.";
-          setOnrampError(String(msg));
+        } else if (eventType === "ONRAMP_WIDGET_TX_SELLING") {
+          setOnrampStage("Processing transaction…");
           setOnrampTx((prev) => ({ ...(prev || {}), ...data }));
         }
       });
@@ -1089,7 +1146,10 @@ export default function AccountClient() {
 
         {onrampStage ? (
           <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/70 px-3 py-2 text-xs text-[var(--re-muted)]">
-            Deposit status: <span className="font-semibold text-[var(--re-text)]">{onrampStage}</span>
+            Deposit status:{" "}
+            <span className="font-semibold text-[var(--re-text)]">
+              {onrampStage}
+            </span>
           </div>
         ) : null}
 
@@ -1216,7 +1276,9 @@ export default function AccountClient() {
               </div>
 
               <div className="rounded-2xl bg-white p-3">
-                <div className="text-xs text-[var(--re-muted)]">Expected crypto</div>
+                <div className="text-xs text-[var(--re-muted)]">
+                  Expected crypto
+                </div>
                 <div className="mt-1 font-semibold">
                   {onrampTx.expectedCryptoAmount ?? onrampTx.cryptoAmount ?? "—"}
                 </div>
@@ -1238,6 +1300,22 @@ export default function AccountClient() {
             </div>
 
             <div className="mt-3 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-white p-3">
+                  <div className="text-xs text-[var(--re-muted)]">Order ID</div>
+                  <div className="mt-1 font-semibold">
+                    {onrampTx.orderId ?? "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-white p-3">
+                  <div className="text-xs text-[var(--re-muted)]">Order status</div>
+                  <div className="mt-1 font-semibold">
+                    {getOnrampOrderStatusLabel(onrampTx.orderStatus)}
+                  </div>
+                </div>
+              </div>
+
               {onrampTx.referenceId ? (
                 <div className="rounded-2xl bg-white p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -1289,9 +1367,9 @@ export default function AccountClient() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-white p-3">
-                  <div className="text-xs text-[var(--re-muted)]">Order ID</div>
-                  <div className="mt-1 font-semibold">
-                    {onrampTx.orderId ?? "—"}
+                  <div className="text-xs text-[var(--re-muted)]">Wallet</div>
+                  <div className="mt-1 break-all font-semibold">
+                    {onrampTx.walletAddress ?? "—"}
                   </div>
                 </div>
 
@@ -1339,7 +1417,8 @@ export default function AccountClient() {
               {SEND_RAILS.map((rail) => {
                 const Icon = rail.icon;
                 const isCrossChain = rail.id === "cross-chain";
-                const disabled = !rail.enabled || (isCrossChain && !crossChainSupportedSource);
+                const disabled =
+                  !rail.enabled || (isCrossChain && !crossChainSupportedSource);
 
                 return (
                   <button
@@ -1356,12 +1435,14 @@ export default function AccountClient() {
                       </div>
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          rail.enabled && !(isCrossChain && !crossChainSupportedSource)
+                          rail.enabled &&
+                          !(isCrossChain && !crossChainSupportedSource)
                             ? "bg-green-100 text-green-700"
                             : "bg-slate-100 text-slate-600"
                         }`}
                       >
-                        {rail.enabled && !(isCrossChain && !crossChainSupportedSource)
+                        {rail.enabled &&
+                        !(isCrossChain && !crossChainSupportedSource)
                           ? "Live"
                           : "Soon"}
                       </span>
@@ -1515,7 +1596,9 @@ export default function AccountClient() {
                   </div>
 
                   <div className="rounded-2xl bg-white p-3">
-                    <div className="text-xs text-[var(--re-muted)]">Estimated fee</div>
+                    <div className="text-xs text-[var(--re-muted)]">
+                      Estimated fee
+                    </div>
                     <div className="mt-1 font-semibold">
                       {formatTokenText(crossQuote.totalFeesFormatted, "USDC")}
                     </div>
@@ -1556,9 +1639,14 @@ export default function AccountClient() {
 
                 <div className="mt-4 space-y-3 text-sm">
                   <div className="rounded-2xl bg-white p-3">
-                    <div className="text-xs text-[var(--re-muted)]">Fund exactly</div>
+                    <div className="text-xs text-[var(--re-muted)]">
+                      Fund exactly
+                    </div>
                     <div className="mt-1 font-semibold">
-                      {formatTokenText(crossIntent.fundingAmountFormatted, crossIntent.token)}
+                      {formatTokenText(
+                        crossIntent.fundingAmountFormatted,
+                        crossIntent.token
+                      )}
                     </div>
                   </div>
 
@@ -1574,7 +1662,10 @@ export default function AccountClient() {
                       </div>
                       <button
                         onClick={() =>
-                          copyText(crossIntent.intentAddress, "Intent address copied.")
+                          copyText(
+                            crossIntent.intentAddress,
+                            "Intent address copied."
+                          )
                         }
                         className="shrink-0 rounded-full border border-[var(--re-border)] p-2"
                       >
@@ -1597,7 +1688,10 @@ export default function AccountClient() {
                         Estimated fee
                       </div>
                       <div className="mt-1 font-semibold">
-                        {formatTokenText(crossIntent.feesFormatted, crossIntent.token)}
+                        {formatTokenText(
+                          crossIntent.feesFormatted,
+                          crossIntent.token
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1632,7 +1726,8 @@ export default function AccountClient() {
                 </div>
 
                 <div className="mt-3 rounded-2xl border border-[var(--re-border)] bg-white/80 px-3 py-2 text-xs text-[var(--re-muted)]">
-                  Wallet send opens your Magic transfer UI. The intent address is already copied so you can fund it directly.
+                  Wallet send opens your Magic transfer UI. The intent address is
+                  already copied so you can fund it directly.
                 </div>
               </div>
             ) : null}
